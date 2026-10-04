@@ -43,10 +43,14 @@ fi
 
 settings_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata"
 mkdir -p "$settings_dir"
+# Update only this script's keys so other settings (SIDE_FALLBACK) stay.
+touch "$settings_dir/settings.env"
+grep -vE '^(STRATA_VISION|VISION_MODEL)=' "$settings_dir/settings.env" >"$settings_dir/settings.env.tmp" || true
 {
   echo "STRATA_VISION=$mode"
   [[ -n "$model" ]] && echo "VISION_MODEL=$model"
-} >"$settings_dir/settings.env"
+} >>"$settings_dir/settings.env.tmp"
+mv "$settings_dir/settings.env.tmp" "$settings_dir/settings.env"
 echo "saved $settings_dir/settings.env"
 
 strata="${STRATA_DIR:-$HOME/Strata}"
