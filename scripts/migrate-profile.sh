@@ -9,7 +9,7 @@ if [[ ! -x /opt/host-omp/omp ]]; then
 fi
 
 profile="${HOME}/.omp/profiles/omp-strata"
-mkdir -p "${HOME}/.omp/profiles"
+mkdir -p "$profile"
 
 if [[ -d "${HOME}/.omp/agent" && ! -e "${profile}/agent" ]]; then
   mv "${HOME}/.omp/agent" "${profile}/agent"
