@@ -83,6 +83,8 @@ The choice is saved in `~/.config/omp-strata/settings.env` (`STRATA_VISION`, `VI
 
 `SIDE_FALLBACK=off` in the same file stops judge and subagent calls from continuing on the coder when the side model fails. Each such fallback is a cold read of an 8–12K-token subagent prompt on the coder, and it evicts the main session's cached prompt, so the next main turn re-reads 55–61K tokens (about a minute on a 3060). With the coder's vision off, a fallback review also cannot see the screenshot. Leave it on for a one-machine install.
 
+`COMPACTION_MODEL=<provider/model>` in the same file moves compaction to that model. omp 18.4.4 always runs `handoff` on the session model, which blocks the coder for minutes (6 min for a 67K-token context in experiment 001). `soft` summarizes with the coder entry's `compactionModel` and can run in the background, so `apply.sh` sets `compactionModel` and puts `soft` first (`soft`, `shake`, `handoff`). The model's loaded context must hold the span older than `keepRecentTokens` (about 45K at a 65536 threshold) plus its summary.
+
 ## The Mac mini experiment
 
 Our development setup includes a Mac mini M4 with 24 GB alongside the 12 GB Strata card. Offloading judge calls, subagent chat, and subagent image reviews to that Mac is an experiment. The repo's focus stays the single card. Coding, the main session's screenshots, handoff, and smol run on `strata/qwen3.8-flash-next-coder-iq1_m`, and an install with only that server still codes, reads screenshots, and compacts. Handoff stays on the coder. Leave `compactionModel` unset.
