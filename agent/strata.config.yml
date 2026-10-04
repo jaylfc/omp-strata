@@ -35,7 +35,7 @@ tools:
   artifactSpillThreshold: 10
   artifactHeadBytes: 10
   artifactTailBytes: 10
-defaultThinkingLevel: minimal
+defaultThinkingLevel: low
 startup:
   checkUpdate: false
 providers:

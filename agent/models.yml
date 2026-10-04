@@ -6,15 +6,16 @@ providers:
     compat:
       qwenTemplateReasoningEffort: true
       extraBody:
-        reasoning_effort: none
+        reasoning_effort: low
+        reasoning_budget_tokens: 1536
     models:
       - id: qwen3.8-flash-next-coder-iq1_m
         name: Qwen3.8-Flash-Next Coder
-        reasoning: false
+        reasoning: true
         input: [text, image]
         imageInputDecoder: stb
         contextWindow: 262144
-        maxTokens: 4096
+        maxTokens: 6144
         cost:
           input: 0
           output: 0
