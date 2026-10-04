@@ -1,0 +1,8 @@
+{
+  "name": "webcheck",
+  "private": true,
+  "type": "module",
+  "description": "One-command real-browser page check for small local coding models",
+  "bin": { "webcheck": "webcheck.mjs" },
+  "dependencies": { "puppeteer-core": "^24" }
+}

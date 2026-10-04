@@ -43,10 +43,12 @@ The coder stays the main model. Coding, the main session's screenshots, handoff,
 | `compaction.asyncEnabled` | `true` | A speculative summary can arm before the threshold. A mid-turn handoff that is not already armed still runs inline on the coder. omp 18.4.4 builds that request on the session model's prompt cache. |
 | Artifact spill | `tools.artifactSpillThreshold`, `artifactHeadBytes`, `artifactTailBytes` all `10` | These are kilobytes. Large tool output leaves the prompt. The head and tail that remain are short. |
 | `defaultThinkingLevel` | `minimal` | Lowest level omp accepts. The provider `extraBody` above is what stops coder thinking on an existing session. |
-| `RULES.md` | caveman lite, ponytail lite, and the vision paragraph | Re-sent every turn, so it stays short. Code, commands, paths, numbers, and error strings stay verbatim. |
+| `RULES.md` | caveman lite, ponytail lite, git, webcheck, and completion() | Re-sent every turn, so it stays short. Code, commands, paths, numbers, and error strings stay verbatim. |
 | Repeated calls | extension, after 3 identical arguments | The next identical call is refused whether the earlier calls failed, succeeded, or mixed. A pure failure streak tells the model to determine why, and includes the oldest failure text. Emitting that same call again steers the session (`pi.sendUserMessage`, `deliverAs: "steer"`): the first steer asks for the cause and a different approach, the second tells the model to drop the step and move to the next item of the goal. A third repeat aborts the turn. Autonomous work keeps going through the first two. A text turn does not reset the counter, and `--continue` rebuilds it from the session. The extension's own refusals do not count as runs. `wait`, `job`, `irc`, `yield`, `todo`, and `goal` may repeat. The signature ignores `i` and `__intent`. |
 | Game probes | 3 per script since the last edit or write | `where.mjs`, `touchprobe.mjs`, `menutest.mjs`, and the other `cinderline/tools/*.mjs` probes share a count even when the shell pipeline changes. `describe.mjs` is refused. A screenshot question in the main session is `read <path>?q=<question>` on the coder. In a subagent, that read stays on the subagent's model. `judge()` tries the Mac, then the coder. |
 | `completion()` | refused | That eval helper calls the coder and replaces the prefix. |
+| Browser eval pre-flight | refused before running | `browser.open("url")` with a string, and `tab.run(() => …)` that touches `document`, `window`, or `fetch` (it runs in Bun, not the page). The refusal shows the accepted form and points at `webcheck`. In a replay of 327 real eval cells from 2026-10-04 these two rules matched 50 of the 133 failures and none of the successes. |
+| `webcheck` | `tools/webcheck`, linked into `~/.local/bin` | One bash command loads a page in headless Chromium with a device (`--device iphone14promax`, `--landscape`, `--standalone` for an installed PWA), runs `--wait`, `--tap X,Y`, `--click`, `--key`, `--eval`, and `--shot` in order, and prints JSON: status, console errors, page errors, eval values, and the element under each tap. A small model gets a real browser without writing async code. Needs Node.js and a Chromium binary (`WEBCHECK_CHROME` overrides the path). |
 | `judge()` | allowed | It uses `modelRoles.judge`. With no judge role configured, the call errors; the 3-repeat block then stops a retry loop. |
 | Subagents | pinned or refused | See the side-model section. |
 | RTK 0.51.0 | installed by `rtk init`, not vendored | Strips shell noise from context. omp needs `rtk` on `PATH` (0.23.0 or newer). |
@@ -158,7 +160,8 @@ agent/models.yml                         strata provider
 agent/strata.config.yml                  keys to merge
 agent/RULES.md                           always-on rules
 agent/skills/mac-mini/SKILL.md           when to use the side model
-agent/extensions/fail-loop-resteer.ts    loop re-steer, completion block, subagent pin, subagent image review
+agent/extensions/fail-loop-resteer.ts    loop re-steer, completion block, eval pre-flight, subagent pin, image review
+tools/webcheck/                          one-command browser check that prints JSON
 bin/omp-strata                          `omp --profile=omp-strata`; `update` pulls this repo
 scripts/install.sh                       link the command, alias it, apply the profile, enable Strata vision
 scripts/apply.sh                         install into ~/.omp/profiles/omp-strata/agent
