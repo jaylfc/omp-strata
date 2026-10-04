@@ -33,7 +33,7 @@ providers:
         reasoning: false
         input: [text, image]
         imageInputDecoder: stb
-        contextWindow: 65536
+        contextWindow: 32768
         maxTokens: 4096
         cost:
           input: 0
