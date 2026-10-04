@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Copy the Strata profile into ~/.omp/profiles/omp-strata/agent.
-# Stock omp keeps ~/.omp/agent. Config keys are merged with `omp config set`,
-# so a theme already in the profile config.yml stays.
+# Stock omp keeps ~/.omp/agent. agent/strata.config.yml is merged with
+# `omp config set`, so a theme already in the profile config.yml stays.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -29,24 +29,14 @@ else
   exit 1
 fi
 
-set_key() {
-  "$omp_bin" --profile=omp-strata config set "$1" "$2"
-  echo "set $1"
-}
-
-set_key modelRoles '{"vision":"mac/prism-ml/bonsai-27b","judge":"mac/prism-ml/bonsai-27b","task":"mac/prism-ml/bonsai-27b","smol":"mac/prism-ml/bonsai-27b"}'
-set_key compaction.methodOrder '["shake","handoff","soft"]'
-set_key compaction.thresholdTokens 65536
-set_key compaction.keepRecentTokens 20000
-set_key compaction.midTurnEnabled true
-set_key compaction.asyncEnabled true
-set_key title.refreshOnReplan false
-set_key provider.appendOnlyContext on
-set_key tools.artifactSpillThreshold 10
-set_key tools.artifactHeadBytes 10
-set_key tools.artifactTailBytes 10
-set_key defaultThinkingLevel minimal
-set_key startup.checkUpdate false
-set_key providers.maxInFlightRequests '{"strata":1,"mac":1}'
+keys="$(mktemp)"
+pairs="$(mktemp)"
+trap 'rm -f "$keys" "$pairs"' EXIT
+"$omp_bin" --profile=omp-strata config list --json >"$keys"
+python3 "$root/scripts/config-pairs.py" "$root/agent/strata.config.yml" "$keys" >"$pairs"
+while IFS= read -r -d '' key && IFS= read -r -d '' value; do
+  "$omp_bin" --profile=omp-strata config set "$key" "$value"
+  echo "set $key"
+done <"$pairs"
 
 echo "extensions load on the next omp-strata start"

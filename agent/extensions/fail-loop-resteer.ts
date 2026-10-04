@@ -10,7 +10,7 @@
  * second model so the spawn does not take the coder's only request slot.
  * Set it to "" to refuse subagents instead. The provider id and model id
  * must exist in models.yml. Remove the fail-loop half once an omp build
- * includes model.toolCallLoopGuard.blockThreshold.
+ * includes the failure block from PR 14312.
  *
  * wait, job, irc, yield, todo, and goal are allowed to repeat.
  */
@@ -84,11 +84,51 @@ interface SessionEntry {
 	};
 }
 
-export interface SeededRun {
-	kind: "fail" | "success";
-	count: number;
+/** The trailing run of one identical call, whatever its results were. */
+export interface Run {
 	signature: string;
-	report: FailureReport;
+	count: number;
+	allFailed: boolean;
+	allSucceeded: boolean;
+	/** Oldest failure in the run, for the fail message. */
+	firstFailure?: FailureReport;
+	/** Newest result in the run. */
+	last: FailureReport;
+}
+
+const OWN_MARKERS = [
+	`<system-interrupt reason="tool_call_loop_blocked">`,
+	`<system-interrupt reason="completion_uses_coder">`,
+	`<system-interrupt reason="describe_mjs_blocked">`,
+	`<system-interrupt reason="probe_repeat_blocked">`,
+];
+
+/** A result that is one of this extension's own refusals is not a real run of the call. */
+function isOwnBlock(text: string): boolean {
+	const head = text.trimStart();
+	return OWN_MARKERS.some(marker => head.startsWith(marker));
+}
+
+/** Extend run with one newer result, or start a new run when the call differs. */
+function extendRun(run: Run | undefined, next: string, isError: boolean, report: FailureReport): Run {
+	if (run && run.signature === next) {
+		return {
+			signature: next,
+			count: run.count + 1,
+			allFailed: run.allFailed && isError,
+			allSucceeded: run.allSucceeded && !isError,
+			firstFailure: run.firstFailure ?? (isError ? report : undefined),
+			last: report,
+		};
+	}
+	return {
+		signature: next,
+		count: 1,
+		allFailed: isError,
+		allSucceeded: !isError,
+		firstFailure: isError ? report : undefined,
+		last: report,
+	};
 }
 
 function textOf(content: unknown): string {
@@ -96,8 +136,8 @@ function textOf(content: unknown): string {
 	return resultText(content as ToolResultShape["content"]);
 }
 
-/** Count the trailing run of one identical call already stored in the session. */
-export function seedFromBranch(branch: readonly SessionEntry[]): SeededRun | undefined {
+/** Rebuild the trailing run of one identical call already stored in the session. */
+export function seedFromBranch(branch: readonly SessionEntry[]): Run | undefined {
 	const calls = new Map<string, { name: string; args: unknown }>();
 	for (const entry of branch) {
 		const message = entry?.message;
@@ -110,34 +150,30 @@ export function seedFromBranch(branch: readonly SessionEntry[]): SeededRun | und
 		}
 	}
 
-	let count = 0;
+	// Find where the trailing run starts, then replay it oldest first.
+	const results: Array<{ name: string; args: unknown; isError: boolean; text: string }> = [];
 	let runSignature: string | undefined;
-	let kind: SeededRun["kind"] | undefined;
-	let report: FailureReport | undefined;
 	for (let index = branch.length - 1; index >= 0; index--) {
 		const message = branch[index]?.message;
 		if (!message || message.role !== "toolResult") continue;
-		const toolName = message.toolName ?? "";
-		if (EXEMPT.has(toolName)) continue;
 		const call = message.toolCallId ? calls.get(message.toolCallId) : undefined;
-		const name = call?.name ?? toolName;
+		const name = call?.name ?? message.toolName ?? "";
 		if (!name || EXEMPT.has(name)) continue;
-		const nextKind: SeededRun["kind"] = message.isError === true ? "fail" : "success";
+		const text = textOf(message.content);
+		if (isOwnBlock(text)) continue;
 		const args = call?.args ?? {};
 		const next = signature(name, args);
-		if (runSignature === undefined) {
-			runSignature = next;
-			kind = nextKind;
-			count = 1;
-			report = reportFor(name, args, textOf(message.content));
-			continue;
-		}
-		if (next !== runSignature || nextKind !== kind) break;
-		count++;
-		if (kind === "fail") report = reportFor(name, args, textOf(message.content));
+		if (runSignature === undefined) runSignature = next;
+		else if (next !== runSignature) break;
+		results.push({ name, args, isError: message.isError === true, text });
 	}
-	if (!runSignature || !report || !kind || count < 1) return undefined;
-	return { kind, count, signature: runSignature, report };
+
+	let run: Run | undefined;
+	for (const result of results.reverse()) {
+		const next = signature(result.name, result.args);
+		run = extendRun(run, next, result.isError, reportFor(result.name, result.args, result.text));
+	}
+	return run;
 }
 
 function failReason(report: FailureReport, count: number): string {
@@ -284,54 +320,17 @@ export default function (pi: {
 	): void;
 	logger?: { warn?: (message: string, fields?: Record<string, unknown>) => void };
 }): void {
-	let failCount = 0;
-	let failSignature: string | undefined;
-	let failReport: FailureReport | undefined;
-	let successCount = 0;
-	let successSignature: string | undefined;
-	let successReport: FailureReport | undefined;
-	let repeatCount = 0;
-	let repeatSignature: string | undefined;
-	let repeatReport: FailureReport | undefined;
+	let run: Run | undefined;
 	let probeSeen: string | undefined;
 	let probeCount = 0;
 
-	const clearFail = (): void => {
-		failCount = 0;
-		failSignature = undefined;
-		failReport = undefined;
-	};
-	const clearSuccess = (): void => {
-		successCount = 0;
-		successSignature = undefined;
-		successReport = undefined;
-	};
-
 	const reseed = (_event: unknown, ctx: SessionContext): void => {
-		clearFail();
-		clearSuccess();
-		repeatCount = 0;
-		repeatSignature = undefined;
-		repeatReport = undefined;
+		run = undefined;
 		probeSeen = undefined;
 		probeCount = 0;
 		try {
 			const branch = ctx?.sessionManager?.getBranch?.();
-			if (!Array.isArray(branch)) return;
-			const seeded = seedFromBranch(branch);
-			if (!seeded) return;
-			repeatCount = seeded.count;
-			repeatSignature = seeded.signature;
-			repeatReport = seeded.report;
-			if (seeded.kind === "fail") {
-				failCount = seeded.count;
-				failSignature = seeded.signature;
-				failReport = seeded.report;
-				return;
-			}
-			successCount = seeded.count;
-			successSignature = seeded.signature;
-			successReport = seeded.report;
+			if (Array.isArray(branch)) run = seedFromBranch(branch);
 		} catch {
 			// A session that cannot be read still counts new calls from zero.
 		}
@@ -368,35 +367,10 @@ export default function (pi: {
 			}
 		}
 		if (EXEMPT.has(event.toolName)) return;
+		const text = resultText(event.content);
+		if (isOwnBlock(text)) return;
 		const next = signature(event.toolName, event.input);
-		const report = reportFor(event.toolName, event.input, resultText(event.content));
-		if (next === repeatSignature && repeatCount > 0) {
-			repeatCount++;
-		} else {
-			repeatCount = 1;
-			repeatSignature = next;
-		}
-		repeatReport = report;
-		if (!event.isError) {
-			clearFail();
-			if (next === successSignature && successCount > 0) {
-				successCount++;
-				successReport = report;
-				return;
-			}
-			successCount = 1;
-			successSignature = next;
-			successReport = report;
-			return;
-		}
-		clearSuccess();
-		if (next === failSignature && failCount > 0) {
-			failCount++;
-			return;
-		}
-		failCount = 1;
-		failSignature = next;
-		failReport = report;
+		run = extendRun(run, next, event.isError, reportFor(event.toolName, event.input, text));
 	});
 
 	pi.on("tool_call", event => {
@@ -419,15 +393,11 @@ export default function (pi: {
 			return { block: true, reason: probeReason(probed, probeCount) };
 		}
 		const next = signature(event.toolName, event.input);
-		if (repeatCount >= BLOCK_AFTER && repeatReport && next === repeatSignature) {
-			pi.logger?.warn?.("blocking repeated tool call", { toolName: event.toolName, count: repeatCount });
-			if (failCount >= BLOCK_AFTER && failReport && next === failSignature) {
-				return { block: true, reason: failReason(failReport, failCount) };
-			}
-			if (successCount >= BLOCK_AFTER && successReport && next === successSignature) {
-				return { block: true, reason: successReason(successReport, successCount) };
-			}
-			return { block: true, reason: repeatReason(repeatReport, repeatCount) };
+		if (run && run.count >= BLOCK_AFTER && next === run.signature) {
+			pi.logger?.warn?.("blocking repeated tool call", { toolName: event.toolName, count: run.count });
+			if (run.allFailed && run.firstFailure) return { block: true, reason: failReason(run.firstFailure, run.count) };
+			if (run.allSucceeded) return { block: true, reason: successReason(run.last, run.count) };
+			return { block: true, reason: repeatReason(run.last, run.count) };
 		}
 	});
 }
