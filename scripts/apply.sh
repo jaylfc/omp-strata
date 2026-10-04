@@ -10,6 +10,10 @@ mkdir -p "$agent/extensions"
 install -m 644 "$root/agent/extensions/fail-loop-resteer.ts" "$agent/extensions/fail-loop-resteer.ts"
 echo "installed $agent/extensions/fail-loop-resteer.ts"
 
+mkdir -p "$agent/skills/mac-mini"
+install -m 644 "$root/agent/skills/mac-mini/SKILL.md" "$agent/skills/mac-mini/SKILL.md"
+echo "installed $agent/skills/mac-mini/SKILL.md"
+
 if [[ -f "$agent/RULES.md" ]]; then
   if cmp -s "$root/agent/RULES.md" "$agent/RULES.md"; then
     echo "RULES.md already matches"

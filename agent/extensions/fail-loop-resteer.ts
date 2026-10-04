@@ -2,15 +2,21 @@
  * Local Strata guard for omp 18.4.4.
  *
  * Blocks the next identical call after the same arguments have been used 3
- * times, whether those calls failed or succeeded. Also refuses the task tool,
- * which would put a second request on the only local server, and refuses
- * eval code that calls judge(): this profile has no judge model and cannot
- * see images. Remove the fail-loop half once an omp build includes
- * model.toolCallLoopGuard.blockThreshold.
+ * times, whether those calls failed or succeeded. Refuses eval code that
+ * calls completion(), which would send that request to the coder. judge()
+ * is allowed: point modelRoles.judge at the side model.
+ *
+ * SIDE_MODEL pins every subagent (the task tool and eval agent()) to a
+ * second model so the spawn does not take the coder's only request slot.
+ * Set it to "" to refuse subagents instead. The provider id and model id
+ * must exist in models.yml. Remove the fail-loop half once an omp build
+ * includes model.toolCallLoopGuard.blockThreshold.
  *
  * wait, job, irc, yield, todo, and goal are allowed to repeat.
  */
 const BLOCK_AFTER = 3;
+/** Empty string refuses subagents. A selector pins them to that model. */
+const SIDE_MODEL = "mac/prism-ml/bonsai-27b";
 const EXEMPT = new Set(["wait", "job", "irc", "yield", "todo", "goal"]);
 const INTENT_KEYS = new Set(["i", "__intent"]);
 
@@ -188,16 +194,16 @@ function codeOf(input: unknown): string {
 	return typeof code === "string" ? code : "";
 }
 
-function callsJudge(input: unknown): boolean {
-	return /\b(judge|judgeBatch|judge_batch|completion)\s*\(/.test(codeOf(input));
+function callsCompletion(input: unknown): boolean {
+	return /\bcompletion\s*\(/.test(codeOf(input));
 }
 
-function judgeReason(): string {
+function completionReason(): string {
 	return [
-		`<system-interrupt reason="no_judge_model">`,
-		"judge() was not run. This session has no judge model, and the coder model cannot see images.",
+		`<system-interrupt reason="completion_uses_coder">`,
+		"completion() was not run. It sends another request to the coder and replaces the prompt cache.",
 		"",
-		"Do not call judge, completion, or screenshot classification. Read game state as numbers or text from the page, or run cinderline/tools/where.mjs, touchprobe.mjs, or menutest.mjs once and use that result.",
+		"Use judge() when a judge model is configured. For a saved image, read <path>?q=<question>. Read game state as numbers or text from the page, or run cinderline/tools/where.mjs, touchprobe.mjs, or menutest.mjs once and use that result.",
 		"",
 		"Continue the current goal with a different action.",
 		`</system-interrupt>`,
@@ -205,6 +211,15 @@ function judgeReason(): string {
 }
 
 function taskReason(): string {
+	if (SIDE_MODEL) {
+		return [
+			`<system-interrupt reason="subagent_pinned">`,
+			`Subagents run on \`${SIDE_MODEL}\` so the coder keeps its prompt cache.`,
+			"",
+			"Continue the current goal. Use the task tool for side work and do not pin that work to the coder.",
+			`</system-interrupt>`,
+		].join("\n");
+	}
 	return [
 		`<system-interrupt reason="local_model_single_request">`,
 		"The task tool was not run. This session uses one local model that serves one request at a time, and a subagent replaces the prompt the goal is in the middle of.",
@@ -222,6 +237,10 @@ export default function (pi: {
 	on(event: "tool_call", handler: (event: ToolCallShape) => { block?: boolean; reason?: string } | undefined): void;
 	on(event: "tool_result", handler: (event: ToolResultShape) => void): void;
 	on(event: "session_start" | "session_switch", handler: (event: unknown, ctx: SessionContext) => void): void;
+	on(
+		event: "before_subagent_spawn",
+		handler: (event: { agent?: string; patterns?: string[] }) => { block?: boolean; reason?: string; model?: string; note?: string } | undefined,
+	): void;
 	logger?: { warn?: (message: string, fields?: Record<string, unknown>) => void };
 }): void {
 	let failCount = 0;
@@ -272,7 +291,21 @@ export default function (pi: {
 			// A session that cannot be read still counts new calls from zero.
 		}
 	};
-	pi.logger?.warn?.("strata resteer loaded", { blockAfter: BLOCK_AFTER });
+	pi.logger?.warn?.("strata resteer loaded", {
+		blockAfter: BLOCK_AFTER,
+		completionBlocked: true,
+		sideModel: SIDE_MODEL || "blocked",
+	});
+	pi.on("before_subagent_spawn", () => {
+		if (!SIDE_MODEL) {
+			pi.logger?.warn?.("blocking subagent with no side model");
+			return { block: true, reason: taskReason() };
+		}
+		return {
+			model: SIDE_MODEL,
+			note: `Subagent pinned to ${SIDE_MODEL} so the coder keeps its prompt cache.`,
+		};
+	});
 	pi.on("session_start", reseed);
 	pi.on("session_switch", reseed);
 
@@ -310,14 +343,14 @@ export default function (pi: {
 	});
 
 	pi.on("tool_call", event => {
-		if (event.toolName === "task") {
+		if (event.toolName === "task" && !SIDE_MODEL) {
 			pi.logger?.warn?.("blocking subagent task on local model", { toolName: event.toolName });
 			return { block: true, reason: taskReason() };
 		}
 		if (EXEMPT.has(event.toolName)) return;
-		if (event.toolName === "eval" && callsJudge(event.input)) {
-			pi.logger?.warn?.("blocking judge() with no judge model", { toolName: event.toolName });
-			return { block: true, reason: judgeReason() };
+		if (event.toolName === "eval" && callsCompletion(event.input)) {
+			pi.logger?.warn?.("blocking completion() on the coder", { toolName: event.toolName });
+			return { block: true, reason: completionReason() };
 		}
 		const next = signature(event.toolName, event.input);
 		if (repeatCount >= BLOCK_AFTER && repeatReport && next === repeatSignature) {

@@ -17,3 +17,7 @@ providers:
           output: 0
           cacheRead: 0
           cacheWrite: 0
+        # Optional. Set this to the vision provider/model id so handoff
+        # summaries leave this server. Leave it unset when that model cannot
+        # hold a prompt near compaction.thresholdTokens.
+        # compactionModel: vision/your-vlm

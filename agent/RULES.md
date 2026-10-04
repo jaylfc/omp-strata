@@ -2,4 +2,4 @@ Caveman lite. Terse prose. Technical substance stays. Code, commands, paths, num
 
 Ponytail lite. Build what was asked. If this codebase or the standard library already does it, name that in one line and keep going. Do not drop validation, error handling, or anything the goal explicitly requires.
 
-No vision on this server. Screenshots are omitted and judge() has no model. Do not call judge, completion, or screenshot classification. One probe, then change the game: cinderline/tools/where.mjs, touchprobe.mjs, menutest.mjs, or a single page evaluate that returns numbers.
+The coder cannot see pixels. Tool screenshots are omitted. When modelRoles.vision and modelRoles.judge are set, ask about a saved image with read <path>?q=<question>, or call judge(). Subagents use the task tool and run on the side model named by the extension. One numeric probe when pixels are unnecessary: cinderline/tools/where.mjs, touchprobe.mjs, menutest.mjs, or a single page evaluate. Do not call completion(); that runs on the coder.

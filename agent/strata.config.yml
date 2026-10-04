@@ -5,6 +5,9 @@ compaction:
     - shake
     - handoff
     - soft
+  # 48000 keeps a coder-only handoff from waiting until the prompt is huge.
+  # When compactionModel points at a smaller side model, lower this so the
+  # handoff prompt fits that model's loaded context minus maxTokens.
   thresholdTokens: 48000
   keepRecentTokens: 20000
   midTurnEnabled: true
