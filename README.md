@@ -1,6 +1,6 @@
 # omp-strata
 
-Profile for [oh-my-pi](https://github.com/can1357/oh-my-pi) pointed at one local [Strata](https://github.com/Niko1221/Strata) server. Install the upstream `omp` binary, then apply this profile on top. The running agent keeps using that upstream binary. This repo is not a second client fork. The only upstream code change is [oh-my-pi PR 14312](https://github.com/can1357/oh-my-pi/pull/14312), and that PR is only the generic identical-failure block at ten.
+Profile for [oh-my-pi](https://github.com/can1357/oh-my-pi) pointed at one local [Strata](https://github.com/Niko1221/Strata) server. Install the upstream `omp` binary, then apply this profile on top. The running agent keeps using that upstream binary. This repo is the guide for that one-machine setup, not a second client fork. The only upstream code change is [oh-my-pi PR 14312](https://github.com/can1357/oh-my-pi/pull/14312), and that PR is only the generic identical-failure block at ten.
 
 Tested on omp 18.4.4 with `qwen3.8-flash-next-coder-iq1_m`, a 262144 context, and one request in flight. Upstream is ahead of that pin. See [UPSTREAM.md](UPSTREAM.md).
 
@@ -18,7 +18,7 @@ RTK's generated `extensions/rtk.ts` is not in this repo. `rtk init` writes it, a
 
 Strata here serves one request at a time and keeps one prompt-cache prefix. The log line is `prompt N tokens = R reused + M read in M ms`. A different request in the middle (a subagent on the same server, a title, a judge call, a compaction handoff) makes the next coder turn cold. Decode is about 17–25 tokens/s. A cold prefill of 100k–160k tokens has taken minutes. Repeated identical tool calls cost the same.
 
-The coder stays the main model. Anything that is not the goal turn goes to a second provider when one is configured, so the coder's prefix stays put.
+The coder stays the main model. Coding, screenshots, handoff, and smol all run on it, so the profile still works when there is no second machine. Judge and subagents are the optional extra: they try a side provider when one is configured, and they continue on the coder when that machine does not answer.
 
 ## Every setting
 
@@ -43,7 +43,7 @@ The coder stays the main model. Anything that is not the goal turn goes to a sec
 | `defaultThinkingLevel` | `minimal` | Lowest level omp accepts. The provider `extraBody` above is what stops coder thinking on an existing session. |
 | `RULES.md` | caveman lite, ponytail lite, and the vision paragraph | Re-sent every turn, so it stays short. Code, commands, paths, numbers, and error strings stay verbatim. |
 | Repeated calls | extension, after 3 identical arguments | The next identical call is refused whether the earlier calls failed, succeeded, or mixed. A pure failure streak tells the model to determine why, and includes the oldest failure text. Emitting that same call again aborts the turn. A text turn does not reset the counter, and `--continue` rebuilds it from the session. The extension's own refusals do not count as runs. `wait`, `job`, `irc`, `yield`, `todo`, and `goal` may repeat. The signature ignores `i` and `__intent`. |
-| Game probes | 3 per script since the last edit or write | `where.mjs`, `touchprobe.mjs`, `menutest.mjs`, and the other `cinderline/tools/*.mjs` probes share a count even when the shell pipeline changes. `describe.mjs` is refused. A screenshot question is `read <path>?q=<question>` on the coder. `judge()` stays on the Mac. |
+| Game probes | 3 per script since the last edit or write | `where.mjs`, `touchprobe.mjs`, `menutest.mjs`, and the other `cinderline/tools/*.mjs` probes share a count even when the shell pipeline changes. `describe.mjs` is refused. A screenshot question is `read <path>?q=<question>` on the coder. `judge()` tries the Mac, then the coder. |
 | `completion()` | refused | That eval helper calls the coder and replaces the prefix. |
 | `judge()` | allowed | It uses `modelRoles.judge`. With no judge role configured, the call errors; the 3-repeat block then stops a retry loop. |
 | Subagents | pinned or refused | See the side-model section. |
@@ -62,21 +62,25 @@ A vision call is a request on the only coder slot, so the following turn misses 
 
 `install.sh` runs the vision script when `STRATA_DIR` or `~/Strata` contains a Strata checkout. The omp profile still installs if that checkout is absent.
 
-## Judge on the Mac
+## One machine, plus an optional Mac
 
-`agent/models.yml` still has the side provider for work that should not take the coder slot. Its base URL is the Mac mini LM Studio on the tailnet, `http://100.123.160.60:1234/v1`, model `prism-ml/bonsai-27b`.
+Coding, vision, handoff, and smol run on `strata/qwen3.8-flash-next-coder-iq1_m`. An install with only that server still codes, reads screenshots, and compacts. Handoff stays on the coder. Leave `compactionModel` unset.
+
+`modelRoles.smol` is the coder. omp uses that role to compress a skill description into one routing hint of at most 12 words, and small background calls use it when no separate tiny model is set. On 2026-10-04 the mac-mini skill prompt was 108 tokens and about 21 generated tokens. A warm coder answer took 1.6–2.2s. The same prompt on the Mac took 3.6–3.7s. Both answers were 14 or 15 words, so omp rejected them and kept the plain preview. That call does not walk `retry.fallbackChains`. It stops after 30s, so the role stays on the machine that is actually there. It is still one request on the coder's only slot. Titles stay off (`--no-title`, and `title.refreshOnReplan: false`) so a title does not add another.
+
+`agent/models.yml` keeps an optional side provider for judge and subagents. On this tailnet its base URL is the Mac mini LM Studio, `http://100.123.160.60:1234/v1`, model `prism-ml/bonsai-27b`. A one-machine install can ignore that provider. Those calls continue on the coder.
 
 | Role | Where it runs |
 | --- | --- |
 | `modelRoles.vision` | The Strata coder. `read <path>?q=<question>`. |
-| `modelRoles.judge` | The Mac. `judge()` and `judgeBatch()`. |
-| `modelRoles.task` | The Mac. The bundled task agent (`@task`). |
-| `modelRoles.smol` | The Mac. Skill compression and other small calls. |
+| `modelRoles.judge` | The Mac first, then the coder. `judge()` and `judgeBatch()`. |
+| `modelRoles.task` | The Mac first, then the coder. The bundled task agent (`@task`). |
+| `modelRoles.smol` | The Strata coder. Skill compression and other small calls. |
 | Coder `compactionModel` | unset. Handoff uses the session model. |
 
 `SIDE_MODEL` in `agent/extensions/fail-loop-resteer.ts` is `mac/prism-ml/bonsai-27b`. Every subagent, including eval `agent()`, is pinned to the Mac. Set it to `""` to refuse subagents when that provider is gone. `apply.sh` overwrites the extension, so the constant in this repo is the one that will be installed.
 
-`retry.fallbackChains` lists the coder under that Mac model and under `judge`, `task`, and `smol`. The Mac is still the first try. When the request fails, omp continues it on the coder instead of dropping the call. That uses the coder's only slot, so the next coder turn reads the prompt cold. `retry.fallbackRevertPolicy` stays `cooldown-expiry`, so a later call tries the Mac again after the suppression window.
+`retry.fallbackChains` lists the coder under that Mac model and under `judge` and `task`. Smol is already the coder, so it has no chain. The Mac is still the first try for judge and subagents. When the request fails, omp continues it on the coder. That uses the coder's only slot, so the next coder turn reads the prompt cold. `retry.fallbackRevertPolicy` stays `cooldown-expiry`, so a later call tries the Mac again after the suppression window.
 
 On the Mac this profile was exercised with, LM Studio serves `prism-ml/bonsai-27b` (MLX, 2-bit). Two server facts decide that entry:
 
