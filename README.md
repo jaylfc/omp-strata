@@ -30,7 +30,7 @@ The coder stays the main model. Coding, the main session's screenshots, handoff,
 | `baseUrl` | `http://127.0.0.1:8080/v1` | Strata's own port. Inside imagelxc, `apply.sh` rewrites the installed copy to `http://127.0.0.1:18080/v1`, the proxy onto host `127.0.0.1:8080`. Strata itself still listens on the host port only. |
 | `api` / `auth` | `openai-completions`, `auth: none` | Matches the local server. `auth: none` still counts as a configured credential, so omp will actually call it. |
 | `compat.qwenTemplateReasoningEffort` plus `extraBody.reasoning_effort: none` | coder thinking off | `low` still spent the 4096 output budget on empty thinking. `extraBody` is applied after the template value, so `none` wins. The model entry is `reasoning: false`. |
-| Coder `input` | `[text, image]` | The coder pack keeps vision. `imageInputDecoder: stb` makes omp send PNG or JPEG. `scripts/enable-strata-vision.sh` turns the encoder on and reserves 700 MiB, which is what fits the encoder beside the expert cache on a 12 GB card. A vision call uses the coder's only slot. |
+| Coder `input` | `[text, image]` | The coder pack keeps vision. `imageInputDecoder: stb` makes omp send PNG or JPEG. `scripts/enable-strata-vision.sh` turns the encoder on and reserves 700 MiB, which is what fits the encoder beside the expert cache on a 12 GB card. A vision call uses the coder's only slot. `scripts/strata-vision.sh off` makes it `[text]` and sends images to another model (see Vision on or off). |
 | Coder `contextWindow` | `262144` | The server is started with `--max-context 262144`. |
 | Coder `maxTokens` | `4096` | Measured generations on this model stopped on their own, largest well under 4096. Raising the cap does not speed the loop. |
 | `providers.maxInFlightRequests.strata` | `1` | A second in-flight call on this server is the thing that drops the prefix. |
@@ -67,6 +67,19 @@ A vision call is a request on the only coder slot, so the following turn misses 
 That path is the main session. omp 18.4.4 answers `read <path>?q=<question>` with `modelRoles.vision` through a direct call. A busy Strata provider waits in `providers.maxInFlightRequests`. A subagent's copy of the extension rewrites that read so the image comes back to the subagent's own model. While the subagent is on the Mac, the review runs there and the coder keeps its slot. After a failed Mac request has continued the subagent on the coder, the same read returns the image on the coder. A one-machine install still answers the main session's screenshot questions on the card.
 
 `install.sh` runs the vision script when `STRATA_DIR` or `~/Strata` contains a Strata checkout. The omp profile still installs if that checkout is absent.
+
+### Vision on or off
+
+Vision on the coder is the default, because a one-machine install has no other model to read pictures. With a second model that accepts images, you can turn the coder's encoder off. The 12 GB card then gives the encoder's VRAM (about 1.2 GB with the 700 MiB reserve) to the expert cache, and screenshots stop taking the coder's only slot.
+
+```bash
+# Images on the coder (default)
+bash scripts/strata-vision.sh on --restart
+# Images on another model from models.yml; the coder is text-only
+bash scripts/strata-vision.sh off --model mac/prism-ml/bonsai-27b --restart
+```
+
+The choice is saved in `~/.config/omp-strata/settings.env` (`STRATA_VISION`, `VISION_MODEL`), so `apply.sh`, `install.sh`, and updates keep it. With `off`, `apply.sh` sets the coder's `input` to `[text]` and `modelRoles.vision` to `VISION_MODEL`. omp then describes tool screenshots with that model, and `read <path>?q=` goes there. The Strata half edits `strata-coder-iq1_m.json` (it keeps the previous file as `.json.vision-on`), and `--restart` restarts the running server through `scripts/restart-strata.sh`. When Strata and omp run on different machines, run the script on each with `--server-only` or `--profile-only`.
 
 ## The Mac mini experiment
 
@@ -166,6 +179,8 @@ bin/omp-strata                          `omp --profile=omp-strata`; `update` pul
 scripts/install.sh                       link the command, alias it, apply the profile, enable Strata vision
 scripts/apply.sh                         install into ~/.omp/profiles/omp-strata/agent
 scripts/enable-strata-vision.sh          mmproj, strata-vision, 700 MiB reserve on a coder config
+scripts/strata-vision.sh                 vision on the coder, or off with images on another model
+scripts/restart-strata.sh                restart the running Strata server with the same command
 scripts/config-pairs.py                  strata.config.yml -> `omp config set` pairs
 scripts/migrate-profile.sh               imagelxc one-time move of the old default agent
 scripts/self-update.sh                   pull this repo and install it
