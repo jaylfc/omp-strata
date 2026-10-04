@@ -81,6 +81,8 @@ bash scripts/strata-vision.sh off --model mac/google/gemma-4-12b-qat --restart
 
 The choice is saved in `~/.config/omp-strata/settings.env` (`STRATA_VISION`, `VISION_MODEL`), so `apply.sh`, `install.sh`, and updates keep it. With `off`, `apply.sh` sets the coder's `input` to `[text]` and `modelRoles.vision` to `VISION_MODEL`. omp then describes tool screenshots with that model, and `read <path>?q=` goes there. The Strata half edits `strata-coder-iq1_m.json` (it keeps the previous file as `.json.vision-on`), and `--restart` restarts the running server through `scripts/restart-strata.sh`. When Strata and omp run on different machines, run the script on each with `--server-only` or `--profile-only`.
 
+`SIDE_FALLBACK=off` in the same file stops judge and subagent calls from continuing on the coder when the side model fails. Each such fallback is a cold read of an 8–12K-token subagent prompt on the coder, and it evicts the main session's cached prompt, so the next main turn re-reads 55–61K tokens (about a minute on a 3060). With the coder's vision off, a fallback review also cannot see the screenshot. Leave it on for a one-machine install.
+
 ## The Mac mini experiment
 
 Our development setup includes a Mac mini M4 with 24 GB alongside the 12 GB Strata card. Offloading judge calls, subagent chat, and subagent image reviews to that Mac is an experiment. The repo's focus stays the single card. Coding, the main session's screenshots, handoff, and smol run on `strata/qwen3.8-flash-next-coder-iq1_m`, and an install with only that server still codes, reads screenshots, and compacts. Handoff stays on the coder. Leave `compactionModel` unset.
