@@ -47,9 +47,26 @@ path.write_text(text)
 print(f"alias omp-strata in {path}")
 PY
 
+# webcheck: one-command real-browser page check for the coder (tools/webcheck).
+if command -v npm >/dev/null 2>&1; then
+  if (cd "$root/tools/webcheck" && npm install --silent --no-audit --no-fund >/dev/null); then
+    chmod +x "$root/tools/webcheck/webcheck.mjs"
+    ln -sfn "$root/tools/webcheck/webcheck.mjs" "${HOME}/.local/bin/webcheck"
+    echo "linked ${HOME}/.local/bin/webcheck"
+  else
+    echo "webcheck was not installed: npm install failed in tools/webcheck"
+  fi
+else
+  echo "webcheck needs Node.js and npm; install them, then rerun scripts/install.sh"
+fi
+
 if [[ -x /opt/host-omp/omp ]] && sudo -n true 2>/dev/null; then
   sudo -n ln -sfn "$root/bin/omp-strata" /usr/local/bin/omp-strata
   echo "linked /usr/local/bin/omp-strata"
+  if [[ -e "$root/tools/webcheck/node_modules" ]]; then
+    sudo -n ln -sfn "$root/tools/webcheck/webcheck.mjs" /usr/local/bin/webcheck
+    echo "linked /usr/local/bin/webcheck"
+  fi
   if [[ -f /usr/local/bin/omp ]] && grep -q 'self-update.sh' /usr/local/bin/omp; then
     sudo -n ln -sfn /opt/host-omp/omp /usr/local/bin/omp
     echo "restored /usr/local/bin/omp -> /opt/host-omp/omp"

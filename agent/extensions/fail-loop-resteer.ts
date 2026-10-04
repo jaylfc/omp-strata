@@ -114,6 +114,7 @@ const OWN_MARKERS = [
 	`<system-interrupt reason="completion_uses_coder">`,
 	`<system-interrupt reason="describe_mjs_blocked">`,
 	`<system-interrupt reason="probe_repeat_blocked">`,
+	`<system-interrupt reason="eval_preflight">`,
 ];
 
 /**
@@ -243,6 +244,38 @@ function codeOf(input: unknown): string {
 	if (!input || typeof input !== "object") return "";
 	const code = (input as { code?: unknown }).code;
 	return typeof code === "string" ? code : "";
+}
+
+/**
+ * Browser-facade mistakes small models make in eval, each with the form omp
+ * 18.4.4 accepts. Each rule matched only failing cells in a replay of 327
+ * real eval cells from 2026-10-04. Matching cells are refused before they run, so the model
+ * gets the fix in one step instead of a stack trace it may retry.
+ */
+const EVAL_PREFLIGHT: Array<{ test: (code: string) => boolean; fix: string }> = [
+	{
+		test: code => /browser\.open\(\s*["'`]/.test(code),
+		fix: 'browser.open takes one options object: `const tab = await browser.open({ name: "main", url: "http://localhost:8123/", viewport: { width: 430, height: 932 } });`',
+	},
+	{
+		test: code => /\.run\(\s*(async\s*)?\(\s*\)\s*=>/.test(code) && /\b(document|window|fetch)\b/.test(code),
+		fix: "tab.run executes in Bun, not in the page; its function receives `{ tab, page }`. Run page code with `await tab.evaluate(() => ({ w: innerWidth, h: innerHeight }))`.",
+	},
+];
+
+function evalPreflight(input: unknown): string | undefined {
+	const code = codeOf(input);
+	if (!code.includes("browser.") && !/\btab\./.test(code)) return undefined;
+	const fixes = EVAL_PREFLIGHT.filter(rule => rule.test(code)).map(rule => `- ${rule.fix}`);
+	if (fixes.length === 0) return undefined;
+	return [
+		`<system-interrupt reason="eval_preflight">`,
+		"This eval cell was not run. It uses the browser API in a way omp rejects:",
+		...fixes,
+		"",
+		"Simplest path for a page check: one bash call to `webcheck <url> --device iphone14promax --eval EXPR --shot /tmp/x.png`. It prints JSON with console errors, page errors, and eval values.",
+		`</system-interrupt>`,
+	].join("\n");
 }
 
 function callsCompletion(input: unknown): boolean {
@@ -496,6 +529,13 @@ export default function (pi: {
 			return refuse(ctx, signature(event.toolName, event.input), taskReason());
 		}
 		if (EXEMPT.has(event.toolName)) return;
+		if (event.toolName === "eval") {
+			const preflight = evalPreflight(event.input);
+			if (preflight) {
+				pi.logger?.warn?.("refusing eval cell that misuses the browser API", { toolName: event.toolName });
+				return refuse(ctx, signature(event.toolName, event.input), preflight);
+			}
+		}
 		if (event.toolName === "eval" && callsCompletion(event.input)) {
 			pi.logger?.warn?.("blocking completion() on the coder", { toolName: event.toolName });
 			return refuse(ctx, signature(event.toolName, event.input), completionReason());
