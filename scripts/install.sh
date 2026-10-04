@@ -74,7 +74,10 @@ if [[ -x /opt/host-omp/omp ]] && sudo -n true 2>/dev/null; then
 fi
 
 strata_dir="${STRATA_DIR:-$HOME/Strata}"
-if [[ -f "$strata_dir/setup.py" ]]; then
+settings="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata/settings.env"
+if [[ -f "$settings" ]] && grep -qx "STRATA_VISION=off" "$settings"; then
+  echo "Strata vision is off ($settings); images go to the model set there"
+elif [[ -f "$strata_dir/setup.py" ]]; then
   if ! bash "$root/scripts/enable-strata-vision.sh"; then
     echo "Strata vision was not enabled. The omp profile is installed. Rerun scripts/enable-strata-vision.sh"
   fi

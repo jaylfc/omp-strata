@@ -34,6 +34,42 @@ if old in text:
 PY
 fi
 
+# Local choices from scripts/strata-vision.sh. Updates keep them.
+STRATA_VISION=on
+VISION_MODEL=""
+settings="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata/settings.env"
+if [[ -f "$settings" ]]; then
+  # shellcheck disable=SC1090
+  source "$settings"
+fi
+config_yml="$root/agent/strata.config.yml"
+if [[ "$STRATA_VISION" == off ]]; then
+  if [[ -z "$VISION_MODEL" ]]; then
+    echo "STRATA_VISION=off needs VISION_MODEL in $settings; run scripts/strata-vision.sh off --model PROVIDER/MODEL" >&2
+    exit 1
+  fi
+  # The coder is text-only, so omp describes images with modelRoles.vision.
+  python3 - "$agent/models.yml" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+old = "        input: [text, image]\n        imageInputDecoder: stb\n        contextWindow: 262144"
+if old not in text:
+    raise SystemExit(f"{path}: coder input line not found; update apply.sh")
+path.write_text(text.replace(old, "        input: [text]\n        imageInputDecoder: stb\n        contextWindow: 262144", 1))
+print("coder input [text] (STRATA_VISION=off)")
+PY
+  config_yml="$(mktemp --suffix=.yml)"
+  python3 - "$root/agent/strata.config.yml" "$config_yml" "$VISION_MODEL" <<'PY'
+import sys, yaml
+src, dst, model = sys.argv[1:]
+cfg = yaml.safe_load(open(src))
+cfg.setdefault("modelRoles", {})["vision"] = model
+yaml.safe_dump(cfg, open(dst, "w"), sort_keys=False)
+print(f"modelRoles.vision {model} (STRATA_VISION=off)")
+PY
+fi
+
 if [[ -x /opt/host-omp/omp ]]; then
   omp_bin=/opt/host-omp/omp
 elif command -v omp >/dev/null 2>&1; then
@@ -47,7 +83,7 @@ keys="$(mktemp)"
 pairs="$(mktemp)"
 trap 'rm -f "$keys" "$pairs"' EXIT
 "$omp_bin" --profile=omp-strata config list --json >"$keys"
-python3 "$root/scripts/config-pairs.py" "$root/agent/strata.config.yml" "$keys" >"$pairs"
+python3 "$root/scripts/config-pairs.py" "$config_yml" "$keys" >"$pairs"
 while IFS= read -r -d '' key && IFS= read -r -d '' value; do
   "$omp_bin" --profile=omp-strata config set "$key" "$value"
   echo "set $key"
