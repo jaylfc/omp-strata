@@ -255,7 +255,7 @@ function codeOf(input: unknown): string {
 const EVAL_PREFLIGHT: Array<{ test: (code: string) => boolean; fix: string }> = [
 	{
 		test: code => /browser\.open\(\s*["'`]/.test(code),
-		fix: 'browser.open takes one options object: `const tab = await browser.open({ name: "main", url: "http://localhost:8123/", viewport: { width: 430, height: 932 } });`',
+		fix: 'browser.open takes one options object: `const tab = await browser.open({ name: "main", url: "<url>", viewport: { width: 430, height: 932 } });`',
 	},
 	{
 		test: code => /\.run\(\s*(async\s*)?\(\s*\)\s*=>/.test(code) && /\b(document|window|fetch)\b/.test(code),
