@@ -37,7 +37,7 @@ if [[ "$mode" != on && "$mode" != off ]]; then
   exit 2
 fi
 if [[ "$mode" == off && "$profile" == 1 && -z "$model" ]]; then
-  echo "strata-vision off needs --model PROVIDER/MODEL for images (for example mac/prism-ml/bonsai-27b)" >&2
+  echo "strata-vision off needs --model PROVIDER/MODEL for images (for example mac/google/gemma-4-12b-qat)" >&2
   exit 2
 fi
 
