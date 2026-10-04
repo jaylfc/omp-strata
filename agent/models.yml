@@ -1,6 +1,6 @@
 providers:
   strata:
-    baseUrl: http://127.0.0.1:18080/v1
+    baseUrl: http://127.0.0.1:8080/v1
     api: openai-completions
     auth: none
     compat:
@@ -11,7 +11,8 @@ providers:
       - id: qwen3.8-flash-next-coder-iq1_m
         name: Qwen3.8-Flash-Next Coder
         reasoning: false
-        input: [text]
+        input: [text, image]
+        imageInputDecoder: stb
         contextWindow: 262144
         maxTokens: 4096
         cost:

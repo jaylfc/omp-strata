@@ -20,6 +20,20 @@ echo "installed $agent/RULES.md"
 install -m 644 "$root/agent/models.yml" "$agent/models.yml"
 echo "installed $agent/models.yml"
 
+# imagelxc reaches host Strata through the proxy on 18080. Other machines use 8080.
+if [[ -x /opt/host-omp/omp ]]; then
+  python3 - "$agent/models.yml" <<'PY'
+import pathlib, sys
+path = pathlib.Path(sys.argv[1])
+text = path.read_text()
+old = "http://127.0.0.1:8080/v1"
+new = "http://127.0.0.1:18080/v1"
+if old in text:
+    path.write_text(text.replace(old, new, 1))
+    print("strata baseUrl 18080 (imagelxc proxy)")
+PY
+fi
+
 if [[ -x /opt/host-omp/omp ]]; then
   omp_bin=/opt/host-omp/omp
 elif command -v omp >/dev/null 2>&1; then

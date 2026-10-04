@@ -55,3 +55,12 @@ if [[ -x /opt/host-omp/omp ]] && sudo -n true 2>/dev/null; then
     echo "restored /usr/local/bin/omp -> /opt/host-omp/omp"
   fi
 fi
+
+strata_dir="${STRATA_DIR:-$HOME/Strata}"
+if [[ -f "$strata_dir/setup.py" ]]; then
+  if ! bash "$root/scripts/enable-strata-vision.sh"; then
+    echo "Strata vision was not enabled. The omp profile is installed. Rerun scripts/enable-strata-vision.sh"
+  fi
+else
+  echo "No Strata checkout at $strata_dir. After the coder is installed, run scripts/enable-strata-vision.sh"
+fi

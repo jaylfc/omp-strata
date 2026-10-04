@@ -25,10 +25,10 @@ The coder stays the main model. Anything that is not the goal turn goes to a sec
 | Piece | Value | Why |
 | --- | --- | --- |
 | Provider id | `strata` | omp 18.2.7 and newer reserves the provider id `local` for tiny on-device models. |
-| `baseUrl` | `http://127.0.0.1:18080/v1` | Inside imagelxc the Incus proxy listens on 18080 and connects to host Strata on `127.0.0.1:8080`. Strata itself still listens on the host port only. |
+| `baseUrl` | `http://127.0.0.1:8080/v1` | Strata's own port. Inside imagelxc, `apply.sh` rewrites the installed copy to `http://127.0.0.1:18080/v1`, the proxy onto host `127.0.0.1:8080`. Strata itself still listens on the host port only. |
 | `api` / `auth` | `openai-completions`, `auth: none` | Matches the local server. `auth: none` still counts as a configured credential, so omp will actually call it. |
 | `compat.qwenTemplateReasoningEffort` plus `extraBody.reasoning_effort: none` | coder thinking off | `low` still spent the 4096 output budget on empty thinking. `extraBody` is applied after the template value, so `none` wins. The model entry is `reasoning: false`. |
-| Coder `input` | `[text]` | This quant does not accept images. Tool images are omitted from the coder request. |
+| Coder `input` | `[text, image]` | The coder pack keeps vision. `imageInputDecoder: stb` makes omp send PNG or JPEG. `scripts/enable-strata-vision.sh` turns the encoder on and reserves 700 MiB, which is what fits the encoder beside the expert cache on a 12 GB card. A vision call uses the coder's only slot. |
 | Coder `contextWindow` | `262144` | The server is started with `--max-context 262144`. |
 | Coder `maxTokens` | `4096` | Measured generations on this model stopped on their own, largest well under 4096. Raising the cap does not speed the loop. |
 | `providers.maxInFlightRequests.strata` | `1` | A second in-flight call on this server is the thing that drops the prefix. |
@@ -43,7 +43,7 @@ The coder stays the main model. Anything that is not the goal turn goes to a sec
 | `defaultThinkingLevel` | `minimal` | Lowest level omp accepts. The provider `extraBody` above is what stops coder thinking on an existing session. |
 | `RULES.md` | caveman lite, ponytail lite, and the vision paragraph | Re-sent every turn, so it stays short. Code, commands, paths, numbers, and error strings stay verbatim. |
 | Repeated calls | extension, after 3 identical arguments | The next identical call is refused whether the earlier calls failed, succeeded, or mixed. A pure failure streak tells the model to determine why, and includes the oldest failure text. Emitting that same call again aborts the turn. A text turn does not reset the counter, and `--continue` rebuilds it from the session. The extension's own refusals do not count as runs. `wait`, `job`, `irc`, `yield`, `todo`, and `goal` may repeat. The signature ignores `i` and `__intent`. |
-| Game probes | 3 per script since the last edit or write | `where.mjs`, `touchprobe.mjs`, `menutest.mjs`, and the other `cinderline/tools/*.mjs` probes share a count even when the shell pipeline changes. `describe.mjs` is refused. Screenshot questions are `read <path>?q=<question>` or one `judge()` call, both on the Mac. |
+| Game probes | 3 per script since the last edit or write | `where.mjs`, `touchprobe.mjs`, `menutest.mjs`, and the other `cinderline/tools/*.mjs` probes share a count even when the shell pipeline changes. `describe.mjs` is refused. A screenshot question is `read <path>?q=<question>` on the coder. `judge()` stays on the Mac. |
 | `completion()` | refused | That eval helper calls the coder and replaces the prefix. |
 | `judge()` | allowed | It uses `modelRoles.judge`. With no judge role configured, the call errors; the 3-repeat block then stops a retry loop. |
 | Subagents | pinned or refused | See the side-model section. |
@@ -52,30 +52,38 @@ The coder stays the main model. Anything that is not the goal turn goes to a sec
 
 Personal theme, symbol preset, and setup version are not part of the profile. `apply.sh` merges keys and leaves those alone.
 
-## Side model
+## Vision on the coder
 
-`agent/models.yml` includes the side provider. Its base URL is the Mac mini LM Studio on the tailnet, `http://100.123.160.60:1234/v1`, model `prism-ml/bonsai-27b`. Point these roles at `mac/prism-ml/bonsai-27b`:
+`modelRoles.vision` is `strata/qwen3.8-flash-next-coder-iq1_m`. `read <path>?q=<question>` uses that role. The coder pack is the GSQ-RCO Coder quant, which keeps the vision pathway. Strata reads pictures with a separate `strata-vision` process and the coder repo's `mmproj-Qwen3.8-Flash-Next-BF16.gguf` (about 0.9 GB). That is not a switch to the full unpruned model.
 
-| Role | What it takes off the coder |
+`scripts/enable-strata-vision.sh` downloads that projector, compiles `strata-vision` when the local engine was built without it, and writes two things into `strata-coder-iq1_m.json`: a `vision` section (`gpu: true`, `max_tokens: 1024`) and `--vision --vram-reserve-mib 700` on the engine. The encoder starts before the engine and holds about 1.2 GB. The 700 MiB reserve is what Strata leaves so a 12 GB card still fits the expert cache. Text decode is a few percent slower. A running server does not pick this up until it is restarted (`--restart` does that when the server is idle).
+
+A vision call is a request on the only coder slot, so the following turn misses the prompt prefix. Handoff stays on the coder. Leave `compactionModel` unset.
+
+`install.sh` runs the vision script when `STRATA_DIR` or `~/Strata` contains a Strata checkout. The omp profile still installs if that checkout is absent.
+
+## Judge on the Mac
+
+`agent/models.yml` still has the side provider for work that should not take the coder slot. Its base URL is the Mac mini LM Studio on the tailnet, `http://100.123.160.60:1234/v1`, model `prism-ml/bonsai-27b`.
+
+| Role | Where it runs |
 | --- | --- |
-| `modelRoles.vision` | `read <path>?q=<question>`, and text descriptions of images attached to a non-vision model. `images.describeForTextModels` already defaults on. |
-| `modelRoles.judge` | `judge()` and `judgeBatch()`. |
-| `modelRoles.task` | The bundled task agent (`@task`). |
-| `modelRoles.smol` | Skill compression and other small calls that would otherwise look for a tiny model and then fall back toward the coder. |
-| Coder `compactionModel` | unset | Handoff does not use this field. Bonsai's loaded context is 41472, which cannot hold a prompt near 65536. A set value makes the soft fallback try the Mac, fail, and summarize on the coder anyway. |
+| `modelRoles.vision` | The Strata coder. `read <path>?q=<question>`. |
+| `modelRoles.judge` | The Mac. `judge()` and `judgeBatch()`. |
+| `modelRoles.task` | The Mac. The bundled task agent (`@task`). |
+| `modelRoles.smol` | The Mac. Skill compression and other small calls. |
+| Coder `compactionModel` | unset. Handoff uses the session model. |
 
-`SIDE_MODEL` at the top of `agent/extensions/fail-loop-resteer.ts` is `mac/prism-ml/bonsai-27b`. Every subagent, including eval `agent()`, is pinned to that selector. Set `SIDE_MODEL` to `""` to refuse subagents instead, which is the right sample behavior when the second provider does not exist. `apply.sh` overwrites the extension, so the constant in this repo is the one that will be installed.
+`SIDE_MODEL` in `agent/extensions/fail-loop-resteer.ts` is `mac/prism-ml/bonsai-27b`. Every subagent, including eval `agent()`, is pinned to the Mac. Set it to `""` to refuse subagents when that provider is gone. `apply.sh` overwrites the extension, so the constant in this repo is the one that will be installed.
 
-On the Mac mini this profile was exercised with, LM Studio serves `prism-ml/bonsai-27b` (MLX, 2-bit, vision). Two server facts decide the omp entry:
+On the Mac this profile was exercised with, LM Studio serves `prism-ml/bonsai-27b` (MLX, 2-bit). Two server facts decide that entry:
 
-- omp sends images as WebP data URLs. LM Studio answers `400 'url' field must be a base64 encoded image` for those. Set `imageInputDecoder: stb` on the model so omp re-encodes to PNG or JPEG first. A direct HTTP call must send `data:image/png;base64,...`.
-- The model thinks unless the request sets `reasoning_effort` to `none`. Thinking can spend the whole `max_tokens` budget and return empty content. Set `compat.extraBody.reasoning_effort: none`. Use `max_tokens` of at least 1500 for a direct call. A verified PNG description with that flag returned in a few seconds.
+- omp sends images as WebP data URLs. LM Studio answers `400 'url' field must be a base64 encoded image` for those. The Mac model sets `imageInputDecoder: stb`, and so does the coder. A direct HTTP call must send `data:image/png;base64,...`.
+- The model thinks unless the request sets `reasoning_effort` to `none`. Thinking can spend the whole `max_tokens` budget and return empty content. Set `compat.extraBody.reasoning_effort: none`.
 
-LM Studio kept this MLX model at context 41472 even when asked for 65536 or 131072. Set the model's `contextWindow` to the loaded context, not the catalog maximum. Handoff stays on the coder, so the compaction threshold is not capped by that window. Leave `compactionModel` unset.
+`providers.maxInFlightRequests` for the Mac is `1`, so a judge call and a subagent queue there instead of loading the 27B model twice. The coder's slot stays separate, so one Mac call can overlap one coder turn. A vision call cannot: it is the coder turn.
 
-`providers.maxInFlightRequests` for the side provider is `1` on that machine so a vision call and a subagent queue on the Mac instead of loading the 27B model twice. The coder's slot stays separate, so one Mac call can overlap one coder turn. Handoff stays on the coder.
-
-The `mac-mini` skill tells the agent which call to use. `RULES.md` stays the short always-on reminder. `apply.sh` replaces `RULES.md` from this repo on every install.
+The `mac-mini` skill tells the agent which call goes where. `RULES.md` stays the short always-on reminder. `apply.sh` replaces `RULES.md` from this repo on every install.
 
 ## What this profile does not change
 
@@ -103,9 +111,9 @@ After that:
 | `omp update` | Upstream's own updater. |
 | `omp-strata update` | `git pull` of this repo, then `scripts/install.sh`. |
 
-`install.sh` links `bin/omp-strata` into `~/.local/bin`, adds the `omp-strata` shell function to `~/.bashrc`, and runs `apply.sh`. `apply.sh` installs the extension, the `mac-mini` skill, `RULES.md`, and `models.yml`, and merges `agent/strata.config.yml` with `omp --profile=omp-strata config set`. Theme keys already in the profile `config.yml` stay. `strata.config.yml` is the only list of keys; `scripts/config-pairs.py` maps it onto `omp config list --json` and needs PyYAML (`python3-yaml`).
+`install.sh` links `bin/omp-strata` into `~/.local/bin`, adds the `omp-strata` shell function to `~/.bashrc`, runs `apply.sh`, and enables Strata vision when a checkout is at `STRATA_DIR` or `~/Strata`. `apply.sh` installs the extension, the `mac-mini` skill, `RULES.md`, and `models.yml`, and merges `agent/strata.config.yml` with `omp --profile=omp-strata config set`. Theme keys already in the profile `config.yml` stay. `strata.config.yml` is the only list of keys; `scripts/config-pairs.py` maps it onto `omp config list --json` and needs PyYAML (`python3-yaml`).
 
-Point Strata's OpenAI server at the machine where omp runs. This repo's `agent/models.yml` uses the imagelxc proxy, `http://127.0.0.1:18080/v1`. On imagelxc the same install restores `/usr/local/bin/omp` to the upstream binary and links `/usr/local/bin/omp-strata`. The first imagelxc install moves the old default `~/.omp/agent` into the profile, because that directory was this profile before the split.
+`agent/models.yml` points Strata at `http://127.0.0.1:8080/v1`. On imagelxc, where `/opt/host-omp/omp` exists, `apply.sh` rewrites the installed copy to `http://127.0.0.1:18080/v1`. The same install restores `/usr/local/bin/omp` to the upstream binary and links `/usr/local/bin/omp-strata`. The first imagelxc install moves the old default `~/.omp/agent` into the profile, because that directory was this profile before the split.
 
 Install RTK 0.51.0 and let it write its extension.
 
@@ -142,8 +150,9 @@ agent/RULES.md                           always-on rules
 agent/skills/mac-mini/SKILL.md           when to use the side model
 agent/extensions/fail-loop-resteer.ts    loop re-steer, completion block, subagent pin
 bin/omp-strata                          `omp --profile=omp-strata`; `update` pulls this repo
-scripts/install.sh                       link the command, alias it, and apply the profile
+scripts/install.sh                       link the command, alias it, apply the profile, enable Strata vision
 scripts/apply.sh                         install into ~/.omp/profiles/omp-strata/agent
+scripts/enable-strata-vision.sh          mmproj, strata-vision, 700 MiB reserve on a coder config
 scripts/config-pairs.py                  strata.config.yml -> `omp config set` pairs
 scripts/migrate-profile.sh               imagelxc one-time move of the old default agent
 scripts/self-update.sh                   pull this repo and install it
