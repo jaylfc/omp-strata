@@ -28,12 +28,12 @@ providers:
       extraBody:
         reasoning_effort: none
     models:
-      - id: prism-ml/bonsai-27b
-        name: Bonsai 27B
+      - id: google/gemma-4-12b-qat
+        name: Gemma 4 12B
         reasoning: false
         input: [text, image]
         imageInputDecoder: stb
-        contextWindow: 41472
+        contextWindow: 49152
         maxTokens: 4096
         cost:
           input: 0

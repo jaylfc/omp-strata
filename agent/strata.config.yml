@@ -2,8 +2,8 @@
 # omp config set does that. Replacing the whole file would drop the theme.
 modelRoles:
   vision: strata/qwen3.8-flash-next-coder-iq1_m
-  judge: mac/prism-ml/bonsai-27b
-  task: mac/prism-ml/bonsai-27b
+  judge: mac/google/gemma-4-12b-qat
+  task: mac/google/gemma-4-12b-qat
   smol: strata/qwen3.8-flash-next-coder-iq1_m
 # Smol stays on the coder. Judge and task try the Mac first.
 # A failed Mac request continues on the coder.
@@ -11,7 +11,7 @@ modelRoles:
 retry:
   modelFallback: true
   fallbackChains:
-    "mac/prism-ml/bonsai-27b":
+    "mac/google/gemma-4-12b-qat":
       - strata/qwen3.8-flash-next-coder-iq1_m
     judge:
       - strata/qwen3.8-flash-next-coder-iq1_m

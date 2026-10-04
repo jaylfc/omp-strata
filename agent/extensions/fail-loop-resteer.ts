@@ -29,7 +29,7 @@ const BLOCK_AFTER = 3;
 /** Steers sent for one repeated refused call before the turn is aborted. */
 const STEERS_BEFORE_ABORT = 2;
 /** Empty string refuses subagents. A selector pins them to that model. */
-const SIDE_MODEL = "mac/prism-ml/bonsai-27b";
+const SIDE_MODEL = "mac/google/gemma-4-12b-qat";
 const EXEMPT = new Set(["wait", "job", "irc", "yield", "todo", "goal"]);
 const INTENT_KEYS = new Set(["i", "__intent"]);
 

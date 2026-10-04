@@ -76,7 +76,7 @@ Vision on the coder is the default, because a one-machine install has no other m
 # Images on the coder (default)
 bash scripts/strata-vision.sh on --restart
 # Images on another model from models.yml; the coder is text-only
-bash scripts/strata-vision.sh off --model mac/prism-ml/bonsai-27b --restart
+bash scripts/strata-vision.sh off --model mac/google/gemma-4-12b-qat --restart
 ```
 
 The choice is saved in `~/.config/omp-strata/settings.env` (`STRATA_VISION`, `VISION_MODEL`), so `apply.sh`, `install.sh`, and updates keep it. With `off`, `apply.sh` sets the coder's `input` to `[text]` and `modelRoles.vision` to `VISION_MODEL`. omp then describes tool screenshots with that model, and `read <path>?q=` goes there. The Strata half edits `strata-coder-iq1_m.json` (it keeps the previous file as `.json.vision-on`), and `--restart` restarts the running server through `scripts/restart-strata.sh`. When Strata and omp run on different machines, run the script on each with `--server-only` or `--profile-only`.
@@ -87,7 +87,7 @@ Our development setup includes a Mac mini M4 with 24 GB alongside the 12 GB Stra
 
 `modelRoles.smol` is the coder. omp uses that role to compress a skill description into one routing hint of at most 12 words and 160 characters, and small background calls use it when no separate tiny model is set. The call does not walk `retry.fallbackChains` and stops after 30s. On 2026-10-04 a 108-token mac-mini prompt took 1.6–2.2s warm on the coder and 3.6–3.7s on the Mac. Both answers were 14 or 15 words, so omp kept the plain preview. The role stays on the coder, which is the machine a single-card install has. After the skill text changed, one cold coder call (108 prompt tokens, 19 generated, about 3.7s) returned `Use Mac mini for judge() and subagents; main-session screenshots use read ?q=`. That line is 12 words and 77 characters, so omp cached it. The same description does not call the coder again. A compression still uses the coder's only slot. Titles stay off (`--no-title`, and `title.refreshOnReplan: false`).
 
-`agent/models.yml` has the side provider for that experiment. On our tailnet it is LM Studio on the Mac mini, `http://100.123.160.60:1234/v1`, model `prism-ml/bonsai-27b`. A single-card install can leave the provider unused. Judge and subagent calls continue on the coder when the Mac does not answer.
+`agent/models.yml` has the side provider for that experiment. On our tailnet it is LM Studio on the Mac mini, `http://100.123.160.60:1234/v1`, model `google/gemma-4-12b-qat`. A single-card install can leave the provider unused. Judge and subagent calls continue on the coder when the Mac does not answer.
 
 | Role | Where it runs |
 | --- | --- |
@@ -97,11 +97,13 @@ Our development setup includes a Mac mini M4 with 24 GB alongside the 12 GB Stra
 | `modelRoles.smol` | The Strata coder. Skill compression and other small calls. |
 | Coder `compactionModel` | unset. Handoff uses the session model. |
 
-`SIDE_MODEL` in `agent/extensions/fail-loop-resteer.ts` is `mac/prism-ml/bonsai-27b`. Every subagent, including eval `agent()`, is pinned to the Mac. Set it to `""` to refuse subagents when that provider is gone. `apply.sh` overwrites the extension, so the constant in this repo is the one that will be installed.
+`SIDE_MODEL` in `agent/extensions/fail-loop-resteer.ts` is `mac/google/gemma-4-12b-qat`. Every subagent, including eval `agent()`, is pinned to the Mac. Set it to `""` to refuse subagents when that provider is gone. `apply.sh` overwrites the extension, so the constant in this repo is the one that will be installed.
 
 `retry.fallbackChains` lists the coder under that Mac model and under `judge` and `task`. Smol is already the coder, so it has no chain. The Mac is still the first try for judge and subagents. When the request fails, omp continues it on the coder. That uses the coder's only slot, so the next coder turn reads the prompt cold. `retry.fallbackRevertPolicy` stays `cooldown-expiry`, so a later call tries the Mac again after the suppression window.
 
-On that Mac mini, LM Studio serves `prism-ml/bonsai-27b` (MLX, 2-bit). Two server facts decide that entry:
+On 2026-10-04 the side model changed from `prism-ml/bonsai-27b` (MLX, 2-bit, dense 27B) to `google/gemma-4-12b-qat` (Gemma 4 12B, Q4_0 GGUF, vision, loaded at 49152 context with 2 parallel slots). On a base M4, the dense 27B read a 6.5K-token prompt at about 31 tok/s and decoded at about 2 tok/s while other requests were queued, so each screenshot review took many minutes. LM Studio's just-in-time model loading is off, so a request can never load the model again with default settings. Gemma 4 26B-A4B (a mixture-of-experts model with about 4B active parameters) is the next candidate to measure.
+
+Two LM Studio facts decide that entry (first measured with Bonsai, and they hold for any model served there):
 
 - omp sends images as WebP data URLs. LM Studio answers `400 'url' field must be a base64 encoded image` for those. The Mac model sets `imageInputDecoder: stb`, and so does the coder. A direct HTTP call must send `data:image/png;base64,...`.
 - The model thinks unless the request sets `reasoning_effort` to `none`. Thinking can spend the whole `max_tokens` budget and return empty content. Set `compat.extraBody.reasoning_effort: none`.
