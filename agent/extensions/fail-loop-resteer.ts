@@ -1,14 +1,16 @@
 /**
  * Local Strata guard for omp 18.4.4.
  *
- * Blocks the next identical call after the same arguments have failed 10
- * times, or succeeded 10 times. Also refuses the task tool, which would put a
- * second request on the only local server. Remove the fail-loop half once an
- * omp build includes model.toolCallLoopGuard.blockThreshold.
+ * Blocks the next identical call after the same arguments have been used 3
+ * times, whether those calls failed or succeeded. Also refuses the task tool,
+ * which would put a second request on the only local server, and refuses
+ * eval code that calls judge(): this profile has no judge model and cannot
+ * see images. Remove the fail-loop half once an omp build includes
+ * model.toolCallLoopGuard.blockThreshold.
  *
  * wait, job, irc, yield, todo, and goal are allowed to repeat.
  */
-const BLOCK_AFTER = 10;
+const BLOCK_AFTER = 3;
 const EXEMPT = new Set(["wait", "job", "irc", "yield", "todo", "goal"]);
 const INTENT_KEYS = new Set(["i", "__intent"]);
 
@@ -164,6 +166,44 @@ function successReason(report: FailureReport, count: number): string {
 	].join("\n");
 }
 
+function repeatReason(report: FailureReport, count: number): string {
+	const result = report.resultSummary || "(no text result)";
+	return [
+		`<system-interrupt reason="tool_call_loop_blocked">`,
+		`This exact \`${report.toolName}\` call already ran ${count} times with the same arguments and was not run again.`,
+		`Arguments: \`${report.argumentsSummary}\``,
+		"",
+		`Last result (truncated): \`${result}\``,
+		"",
+		"Read that result and continue the current goal with a different action. Repeating these arguments will not produce a new result.",
+		"",
+		`Do not call \`${report.toolName}\` with these arguments again.`,
+		`</system-interrupt>`,
+	].join("\n");
+}
+
+function codeOf(input: unknown): string {
+	if (!input || typeof input !== "object") return "";
+	const code = (input as { code?: unknown }).code;
+	return typeof code === "string" ? code : "";
+}
+
+function callsJudge(input: unknown): boolean {
+	return /\b(judge|judgeBatch|judge_batch|completion)\s*\(/.test(codeOf(input));
+}
+
+function judgeReason(): string {
+	return [
+		`<system-interrupt reason="no_judge_model">`,
+		"judge() was not run. This session has no judge model, and the coder model cannot see images.",
+		"",
+		"Do not call judge, completion, or screenshot classification. Read game state as numbers or text from the page, or run cinderline/tools/where.mjs, touchprobe.mjs, or menutest.mjs once and use that result.",
+		"",
+		"Continue the current goal with a different action.",
+		`</system-interrupt>`,
+	].join("\n");
+}
+
 function taskReason(): string {
 	return [
 		`<system-interrupt reason="local_model_single_request">`,
@@ -190,6 +230,9 @@ export default function (pi: {
 	let successCount = 0;
 	let successSignature: string | undefined;
 	let successReport: FailureReport | undefined;
+	let repeatCount = 0;
+	let repeatSignature: string | undefined;
+	let repeatReport: FailureReport | undefined;
 
 	const clearFail = (): void => {
 		failCount = 0;
@@ -205,11 +248,17 @@ export default function (pi: {
 	const reseed = (_event: unknown, ctx: SessionContext): void => {
 		clearFail();
 		clearSuccess();
+		repeatCount = 0;
+		repeatSignature = undefined;
+		repeatReport = undefined;
 		try {
 			const branch = ctx?.sessionManager?.getBranch?.();
 			if (!Array.isArray(branch)) return;
 			const seeded = seedFromBranch(branch);
 			if (!seeded) return;
+			repeatCount = seeded.count;
+			repeatSignature = seeded.signature;
+			repeatReport = seeded.report;
 			if (seeded.kind === "fail") {
 				failCount = seeded.count;
 				failSignature = seeded.signature;
@@ -223,6 +272,7 @@ export default function (pi: {
 			// A session that cannot be read still counts new calls from zero.
 		}
 	};
+	pi.logger?.warn?.("strata resteer loaded", { blockAfter: BLOCK_AFTER });
 	pi.on("session_start", reseed);
 	pi.on("session_switch", reseed);
 
@@ -230,6 +280,13 @@ export default function (pi: {
 		if (EXEMPT.has(event.toolName)) return;
 		const next = signature(event.toolName, event.input);
 		const report = reportFor(event.toolName, event.input, resultText(event.content));
+		if (next === repeatSignature && repeatCount > 0) {
+			repeatCount++;
+		} else {
+			repeatCount = 1;
+			repeatSignature = next;
+		}
+		repeatReport = report;
 		if (!event.isError) {
 			clearFail();
 			if (next === successSignature && successCount > 0) {
@@ -258,17 +315,20 @@ export default function (pi: {
 			return { block: true, reason: taskReason() };
 		}
 		if (EXEMPT.has(event.toolName)) return;
-		const next = signature(event.toolName, event.input);
-		if (failCount >= BLOCK_AFTER && failReport && next === failSignature) {
-			pi.logger?.warn?.("blocking repeated failing tool call", { toolName: event.toolName, count: failCount });
-			return { block: true, reason: failReason(failReport, failCount) };
+		if (event.toolName === "eval" && callsJudge(event.input)) {
+			pi.logger?.warn?.("blocking judge() with no judge model", { toolName: event.toolName });
+			return { block: true, reason: judgeReason() };
 		}
-		if (successCount >= BLOCK_AFTER && successReport && next === successSignature) {
-			pi.logger?.warn?.("blocking repeated successful tool call", {
-				toolName: event.toolName,
-				count: successCount,
-			});
-			return { block: true, reason: successReason(successReport, successCount) };
+		const next = signature(event.toolName, event.input);
+		if (repeatCount >= BLOCK_AFTER && repeatReport && next === repeatSignature) {
+			pi.logger?.warn?.("blocking repeated tool call", { toolName: event.toolName, count: repeatCount });
+			if (failCount >= BLOCK_AFTER && failReport && next === failSignature) {
+				return { block: true, reason: failReason(failReport, failCount) };
+			}
+			if (successCount >= BLOCK_AFTER && successReport && next === successSignature) {
+				return { block: true, reason: successReason(successReport, successCount) };
+			}
+			return { block: true, reason: repeatReason(repeatReport, repeatCount) };
 		}
 	});
 }

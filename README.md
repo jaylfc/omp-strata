@@ -19,12 +19,13 @@ Strata here serves one request at a time and keeps one prompt-cache prefix. A se
 | Short thinking | `defaultThinkingLevel: low` and `compat.qwenTemplateReasoningEffort: true` | Asks the server for low reasoning effort. |
 | Output cap | `maxTokens: 4096` | Enough for the turns measured on this model. |
 | Terse replies | `RULES.md` | Short always-on rules. Code, commands, paths, numbers, and error strings stay verbatim. |
-| Repeated calls | extension, after 10 identical failures or 10 identical successes | The goal stays active. The next identical call is refused and the model is told to continue that goal with a different action. |
+| Repeated calls | extension, after 3 identical arguments | The goal stays active. The next identical call is refused. Failures still say to find the cause. |
+| No judge | eval that calls `judge()` is refused | There is no second model, and this one cannot see images. |
 | Shell noise | [RTK](https://github.com/rtk-ai/rtk) 0.51.0 | `rtk init` installs its own extension. This repo does not vendor that generated file. |
 
 `wait`, `job`, `irc`, `yield`, `todo`, and `goal` may repeat. The provider name stays `strata`.
 
-The failure block is also proposed upstream in [oh-my-pi PR 14312](https://github.com/can1357/oh-my-pi/pull/14312). The success block and the `task` block live in this profile.
+The failure block is also proposed upstream in [oh-my-pi PR 14312](https://github.com/can1357/oh-my-pi/pull/14312), at ten failures. This profile blocks at three and also blocks `judge()`.
 
 ## Install
 
