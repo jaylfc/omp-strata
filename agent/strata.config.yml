@@ -1,16 +1,20 @@
 # Merge these keys into ~/.omp/agent/config.yml.
-# omp config set does that. Replacing the whole file would drop theme and model roles.
+# omp config set does that. Replacing the whole file would drop the theme.
+modelRoles:
+  vision: mac/prism-ml/bonsai-27b
+  judge: mac/prism-ml/bonsai-27b
+  task: mac/prism-ml/bonsai-27b
+  smol: mac/prism-ml/bonsai-27b
 compaction:
   methodOrder:
     - shake
     - handoff
     - soft
-  # 48000 keeps a coder-only handoff from waiting until the prompt is huge.
-  # When compactionModel points at a smaller side model, lower this so the
-  # handoff prompt fits that model's loaded context minus maxTokens.
-  thresholdTokens: 48000
+  # 32000 fits a handoff inside Bonsai's loaded 41472 context, minus maxTokens.
+  thresholdTokens: 32000
   keepRecentTokens: 20000
   midTurnEnabled: true
+  asyncEnabled: true
 title:
   refreshOnReplan: false
 provider:
@@ -20,6 +24,9 @@ tools:
   artifactHeadBytes: 10
   artifactTailBytes: 10
 defaultThinkingLevel: low
+startup:
+  checkUpdate: false
 providers:
   maxInFlightRequests:
     strata: 1
+    mac: 1

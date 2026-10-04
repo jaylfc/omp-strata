@@ -1,0 +1,9 @@
+[Unit]
+Description=Hourly pull of jaylfc/omp-strata
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,6 @@
+[Unit]
+Description=Apply jaylfc/omp-strata inside imagelxc
+
+[Service]
+Type=oneshot
+ExecStart=%h/src/omp-strata/scripts/host-self-update.sh

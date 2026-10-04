@@ -1,6 +1,6 @@
 providers:
   strata:
-    baseUrl: http://127.0.0.1:8080/v1
+    baseUrl: http://127.0.0.1:18080/v1
     api: openai-completions
     auth: none
     compat:
@@ -12,12 +12,29 @@ providers:
         input: [text]
         contextWindow: 262144
         maxTokens: 4096
+        compactionModel: mac/prism-ml/bonsai-27b
         cost:
           input: 0
           output: 0
           cacheRead: 0
           cacheWrite: 0
-        # Optional. Set this to the vision provider/model id so handoff
-        # summaries leave this server. Leave it unset when that model cannot
-        # hold a prompt near compaction.thresholdTokens.
-        # compactionModel: vision/your-vlm
+  mac:
+    baseUrl: http://100.123.160.60:1234/v1
+    api: openai-completions
+    auth: none
+    compat:
+      extraBody:
+        reasoning_effort: none
+    models:
+      - id: prism-ml/bonsai-27b
+        name: Bonsai 27B
+        reasoning: false
+        input: [text, image]
+        imageInputDecoder: stb
+        contextWindow: 41472
+        maxTokens: 4096
+        cost:
+          input: 0
+          output: 0
+          cacheRead: 0
+          cacheWrite: 0
