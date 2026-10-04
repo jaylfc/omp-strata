@@ -74,7 +74,7 @@ LM Studio kept this MLX model at context 41472 even when asked for 65536 or 1310
 
 `providers.maxInFlightRequests` for the side provider is `1` on that machine so a vision call, a subagent, and a handoff queue on the Mac instead of loading the 27B model twice. The coder's slot stays separate, so one Mac call can overlap one coder turn.
 
-The `mac-mini` skill tells the agent which call to use. `RULES.md` stays the short always-on reminder. A machine-specific `RULES.md` can name the model; `apply.sh` will not overwrite an existing rules file.
+The `mac-mini` skill tells the agent which call to use. `RULES.md` stays the short always-on reminder. `apply.sh` replaces `RULES.md` from this repo on every install.
 
 ## What this profile does not change
 
