@@ -62,7 +62,7 @@ Personal theme, symbol preset, and setup version are not part of the profile. `a
 
 A vision call is a request on the only coder slot, so the following turn misses the prompt prefix. Handoff stays on the coder. Leave `compactionModel` unset.
 
-That path is the main session. omp 18.4.4 answers `read <path>?q=<question>` with `modelRoles.vision` through a direct call, and a busy Strata provider waits in `providers.maxInFlightRequests` instead of failing over. A subagent's copy of the extension rewrites that read so the image comes back to the subagent's own model. While the subagent is on the Mac, the review runs there and the coder keeps its slot. After a failed Mac request has continued the subagent on the coder, the same read returns the image on the coder. A one-machine install still answers the main session's screenshot questions on the card.
+That path is the main session. omp 18.4.4 answers `read <path>?q=<question>` with `modelRoles.vision` through a direct call. A busy Strata provider waits in `providers.maxInFlightRequests`. A subagent's copy of the extension rewrites that read so the image comes back to the subagent's own model. While the subagent is on the Mac, the review runs there and the coder keeps its slot. After a failed Mac request has continued the subagent on the coder, the same read returns the image on the coder. A one-machine install still answers the main session's screenshot questions on the card.
 
 `install.sh` runs the vision script when `STRATA_DIR` or `~/Strata` contains a Strata checkout. The omp profile still installs if that checkout is absent.
 
@@ -70,7 +70,7 @@ That path is the main session. omp 18.4.4 answers `read <path>?q=<question>` wit
 
 Our development setup includes a Mac mini M4 with 24 GB alongside the 12 GB Strata card. Offloading judge calls, subagent chat, and subagent image reviews to that Mac is an experiment. The repo's focus stays the single card. Coding, the main session's screenshots, handoff, and smol run on `strata/qwen3.8-flash-next-coder-iq1_m`, and an install with only that server still codes, reads screenshots, and compacts. Handoff stays on the coder. Leave `compactionModel` unset.
 
-`modelRoles.smol` is the coder. omp uses that role to compress a skill description into one routing hint of at most 12 words, and small background calls use it when no separate tiny model is set. On 2026-10-04 the mac-mini skill prompt was 108 tokens and about 21 generated tokens. A warm coder answer took 1.6–2.2s. The same prompt on the Mac took 3.6–3.7s. Both answers were 14 or 15 words, so omp rejected them and kept the plain preview. That call does not walk `retry.fallbackChains`. It stops after 30s, so the role stays on the machine that is actually there. It is still one request on the coder's only slot. Titles stay off (`--no-title`, and `title.refreshOnReplan: false`) so a title does not add another.
+`modelRoles.smol` is the coder. omp uses that role to compress a skill description into one routing hint of at most 12 words and 160 characters, and small background calls use it when no separate tiny model is set. The call does not walk `retry.fallbackChains` and stops after 30s. On 2026-10-04 a 108-token mac-mini prompt took 1.6–2.2s warm on the coder and 3.6–3.7s on the Mac. Both answers were 14 or 15 words, so omp kept the plain preview. The role stays on the coder, which is the machine a single-card install has. After the skill text changed, one cold coder call (108 prompt tokens, 19 generated, about 3.7s) returned `Use Mac mini for judge() and subagents; main-session screenshots use read ?q=`. That line is 12 words and 77 characters, so omp cached it. The same description does not call the coder again. A compression still uses the coder's only slot. Titles stay off (`--no-title`, and `title.refreshOnReplan: false`).
 
 `agent/models.yml` has the side provider for that experiment. On our tailnet it is LM Studio on the Mac mini, `http://100.123.160.60:1234/v1`, model `prism-ml/bonsai-27b`. A single-card install can leave the provider unused. Judge and subagent calls continue on the coder when the Mac does not answer.
 
@@ -158,7 +158,7 @@ agent/models.yml                         strata provider
 agent/strata.config.yml                  keys to merge
 agent/RULES.md                           always-on rules
 agent/skills/mac-mini/SKILL.md           when to use the side model
-agent/extensions/fail-loop-resteer.ts    loop re-steer, completion block, subagent pin
+agent/extensions/fail-loop-resteer.ts    loop re-steer, completion block, subagent pin, subagent image review
 bin/omp-strata                          `omp --profile=omp-strata`; `update` pulls this repo
 scripts/install.sh                       link the command, alias it, apply the profile, enable Strata vision
 scripts/apply.sh                         install into ~/.omp/profiles/omp-strata/agent

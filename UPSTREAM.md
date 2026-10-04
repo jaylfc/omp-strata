@@ -1,7 +1,7 @@
 # Upstream pin
 
 tested_omp: 18.4.4
-upstream_latest_seen: v18.6.0
+upstream_latest_seen: v18.6.1
 upstream_latest_seen_at: 2026-10-04
 pr_14312_state: OPEN
 pr_14312_head: cbef7c5a5258062eb88d7704613aefdd808c2892

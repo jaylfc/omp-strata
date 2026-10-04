@@ -5,7 +5,7 @@ description: Use the Mac mini for judge() and subagents. A subagent image review
 
 # Mac mini side model
 
-The coder serves one request and reads images through Strata. A second request on that server drops the prompt cache. Judge and subagents go to the provider named `mac` in `~/.omp/profiles/omp-strata/agent/models.yml`.
+The coder serves one request. The main session reads images through Strata. A subagent reads images on its own model. A second request on the coder drops the prompt cache. Judge and subagents go to the provider named `mac` in `~/.omp/profiles/omp-strata/agent/models.yml`.
 
 ## What to call
 
