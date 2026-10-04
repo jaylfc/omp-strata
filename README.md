@@ -2,6 +2,8 @@
 
 Profile for [oh-my-pi](https://github.com/can1357/oh-my-pi) pointed at one local [Strata](https://github.com/Niko1221/Strata) server. Install the upstream `omp` binary, then apply this profile on top. The running agent keeps using that upstream binary. This repo is the guide for that one-machine setup, not a second client fork. The only upstream code change is [oh-my-pi PR 14312](https://github.com/can1357/oh-my-pi/pull/14312), and that PR is only the generic identical-failure block at ten.
 
+The focus is a single card on one machine. Our setup also includes a Mac mini M4 with 24 GB, and we are experimenting with offloading judge calls and subtasks to it. Coding, vision, handoff, and smol stay on the Strata card either way. An install with no second machine does that same work on the card.
+
 Tested on omp 18.4.4 with `qwen3.8-flash-next-coder-iq1_m`, a 262144 context, and one request in flight. Upstream is ahead of that pin. See [UPSTREAM.md](UPSTREAM.md).
 
 ## Updates come from this repo
@@ -18,7 +20,7 @@ RTK's generated `extensions/rtk.ts` is not in this repo. `rtk init` writes it, a
 
 Strata here serves one request at a time and keeps one prompt-cache prefix. The log line is `prompt N tokens = R reused + M read in M ms`. A different request in the middle (a subagent on the same server, a title, a judge call, a compaction handoff) makes the next coder turn cold. Decode is about 17–25 tokens/s. A cold prefill of 100k–160k tokens has taken minutes. Repeated identical tool calls cost the same.
 
-The coder stays the main model. Coding, screenshots, handoff, and smol all run on it, so the profile still works when there is no second machine. Judge and subagents are the optional extra: they try a side provider when one is configured, and they continue on the coder when that machine does not answer.
+The coder stays the main model. Coding, screenshots, handoff, and smol all run on it, which is the path for a single card. Judge and subagents are the Mac mini experiment below: they try that machine when it is configured, and they continue on the coder when it does not answer.
 
 ## Every setting
 
@@ -62,13 +64,13 @@ A vision call is a request on the only coder slot, so the following turn misses 
 
 `install.sh` runs the vision script when `STRATA_DIR` or `~/Strata` contains a Strata checkout. The omp profile still installs if that checkout is absent.
 
-## One machine, plus an optional Mac
+## The Mac mini experiment
 
-Coding, vision, handoff, and smol run on `strata/qwen3.8-flash-next-coder-iq1_m`. An install with only that server still codes, reads screenshots, and compacts. Handoff stays on the coder. Leave `compactionModel` unset.
+Our development setup includes a Mac mini M4 with 24 GB alongside the 12 GB Strata card. Offloading judge calls and subtasks to that Mac is an experiment. The repo's focus stays the single card. Coding, vision, handoff, and smol run on `strata/qwen3.8-flash-next-coder-iq1_m`, and an install with only that server still codes, reads screenshots, and compacts. Handoff stays on the coder. Leave `compactionModel` unset.
 
 `modelRoles.smol` is the coder. omp uses that role to compress a skill description into one routing hint of at most 12 words, and small background calls use it when no separate tiny model is set. On 2026-10-04 the mac-mini skill prompt was 108 tokens and about 21 generated tokens. A warm coder answer took 1.6–2.2s. The same prompt on the Mac took 3.6–3.7s. Both answers were 14 or 15 words, so omp rejected them and kept the plain preview. That call does not walk `retry.fallbackChains`. It stops after 30s, so the role stays on the machine that is actually there. It is still one request on the coder's only slot. Titles stay off (`--no-title`, and `title.refreshOnReplan: false`) so a title does not add another.
 
-`agent/models.yml` keeps an optional side provider for judge and subagents. On this tailnet its base URL is the Mac mini LM Studio, `http://100.123.160.60:1234/v1`, model `prism-ml/bonsai-27b`. A one-machine install can ignore that provider. Those calls continue on the coder.
+`agent/models.yml` has the side provider for that experiment. On our tailnet it is LM Studio on the Mac mini, `http://100.123.160.60:1234/v1`, model `prism-ml/bonsai-27b`. A single-card install can leave the provider unused. Judge and subagent calls continue on the coder when the Mac does not answer.
 
 | Role | Where it runs |
 | --- | --- |
@@ -82,7 +84,7 @@ Coding, vision, handoff, and smol run on `strata/qwen3.8-flash-next-coder-iq1_m`
 
 `retry.fallbackChains` lists the coder under that Mac model and under `judge` and `task`. Smol is already the coder, so it has no chain. The Mac is still the first try for judge and subagents. When the request fails, omp continues it on the coder. That uses the coder's only slot, so the next coder turn reads the prompt cold. `retry.fallbackRevertPolicy` stays `cooldown-expiry`, so a later call tries the Mac again after the suppression window.
 
-On the Mac this profile was exercised with, LM Studio serves `prism-ml/bonsai-27b` (MLX, 2-bit). Two server facts decide that entry:
+On that Mac mini, LM Studio serves `prism-ml/bonsai-27b` (MLX, 2-bit). Two server facts decide that entry:
 
 - omp sends images as WebP data URLs. LM Studio answers `400 'url' field must be a base64 encoded image` for those. The Mac model sets `imageInputDecoder: stb`, and so does the coder. A direct HTTP call must send `data:image/png;base64,...`.
 - The model thinks unless the request sets `reasoning_effort` to `none`. Thinking can spend the whole `max_tokens` budget and return empty content. Set `compat.extraBody.reasoning_effort: none`.
