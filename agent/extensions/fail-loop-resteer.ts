@@ -3,8 +3,10 @@
  *
  * Blocks the next identical call after the same arguments have been used 3
  * times, whether those calls failed or succeeded. A refusal is a tool
- * result, so the model can emit that call again. The second refusal of the
- * same call aborts the turn. Refuses eval code that calls completion(),
+ * result, so the model can emit that call again. When it does, the guard
+ * steers the session with a message that asks for a new approach, so
+ * autonomous work keeps going. After STEERS_BEFORE_ABORT steers on the same
+ * call the turn is aborted. Refuses eval code that calls completion(),
  * which would send that request to the coder. judge() is allowed: point
  * modelRoles.judge at the side model.
  *
@@ -24,6 +26,8 @@
  * the coder after that call has continued on the coder.
  */
 const BLOCK_AFTER = 3;
+/** Steers sent for one repeated refused call before the turn is aborted. */
+const STEERS_BEFORE_ABORT = 2;
 /** Empty string refuses subagents. A selector pins them to that model. */
 const SIDE_MODEL = "mac/prism-ml/bonsai-27b";
 const EXEMPT = new Set(["wait", "job", "irc", "yield", "todo", "goal"]);
@@ -335,6 +339,20 @@ function completionReason(): string {
 	].join("\n");
 }
 
+function steerText(steers: number): string {
+	if (steers === 1) {
+		return [
+			"Loop guard: you sent a tool call that was already refused. That approach is finished.",
+			"In one sentence, state why it kept failing or repeating. Then take a different approach: a different tool, a different command, or a smaller step.",
+			"Continue the current goal.",
+		].join("\n");
+	}
+	return [
+		"Loop guard: the same refused call came back again. Drop this step.",
+		"Write a one-line note of what is still unverified, move on to the next item of the current goal, and come back to this one later with a new method.",
+	].join("\n");
+}
+
 function taskReason(): string {
 	if (SIDE_MODEL) {
 		return [
@@ -372,12 +390,14 @@ export default function (pi: {
 		event: "before_subagent_spawn",
 		handler: (event: { agent?: string; patterns?: string[] }) => { block?: boolean; reason?: string; model?: string; note?: string } | undefined,
 	): void;
+	sendUserMessage?: (content: string, options?: { deliverAs?: "steer" | "followUp" | "aside"; attribution?: "user" | "agent" }) => void;
 	logger?: { warn?: (message: string, fields?: Record<string, unknown>) => void };
 }): void {
 	let run: Run | undefined;
 	let probeSeen: string | undefined;
 	let probeCount = 0;
 	let blockedSig: string | undefined;
+	let steers = 0;
 
 	const refuse = (
 		ctx: { abort?: () => void } | undefined,
@@ -385,13 +405,25 @@ export default function (pi: {
 		reason: string,
 	): { block: true; reason: string } => {
 		if (blockedSig === sig) {
-			pi.logger?.warn?.("aborting turn after a blocked call was repeated", { signature: sig });
+			steers++;
+			if (steers <= STEERS_BEFORE_ABORT && pi.sendUserMessage) {
+				pi.logger?.warn?.("steering after a blocked call was repeated", { signature: sig, steers });
+				try {
+					pi.sendUserMessage(steerText(steers), { deliverAs: "steer", attribution: "agent" });
+					return { block: true, reason };
+				} catch {
+					// Fall through to abort when the steer cannot be delivered.
+				}
+			}
+			pi.logger?.warn?.("aborting turn after a blocked call was repeated", { signature: sig, steers });
 			try {
 				ctx?.abort?.();
 			} catch {
 				// The block still stops this call when abort is unavailable.
 			}
+			return { block: true, reason };
 		}
+		steers = 0;
 		blockedSig = sig;
 		return { block: true, reason };
 	};
@@ -401,6 +433,7 @@ export default function (pi: {
 		probeSeen = undefined;
 		probeCount = 0;
 		blockedSig = undefined;
+		steers = 0;
 		try {
 			const branch = ctx?.sessionManager?.getBranch?.();
 			if (Array.isArray(branch)) run = seedFromBranch(branch);
