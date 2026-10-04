@@ -103,10 +103,12 @@ const OWN_MARKERS = [
 	`<system-interrupt reason="probe_repeat_blocked">`,
 ];
 
-/** A result that is one of this extension's own refusals is not a real run of the call. */
+/**
+ * A result that is one of this extension's own refusals is not a real run of
+ * the call. omp may wrap the refusal text, so the marker can sit anywhere.
+ */
 function isOwnBlock(text: string): boolean {
-	const head = text.trimStart();
-	return OWN_MARKERS.some(marker => head.startsWith(marker));
+	return OWN_MARKERS.some(marker => text.includes(marker));
 }
 
 /** Extend run with one newer result, or start a new run when the call differs. */
