@@ -38,6 +38,7 @@ fi
 STRATA_VISION=on
 VISION_MODEL=""
 SIDE_FALLBACK=on
+COMPACTION_MODEL=""
 settings="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata/settings.env"
 if [[ -f "$settings" ]]; then
   # shellcheck disable=SC1090
@@ -66,6 +67,22 @@ fi
 # SIDE_FALLBACK=off: a failed side-model call errors instead of continuing on
 # the coder. Each fallback is a cold read on the coder and evicts its prompt cache.
 [[ "$SIDE_FALLBACK" == off ]] && overrides+=("nofallback")
+# COMPACTION_MODEL: omp 18.4.4 runs handoff on the session model and blocks the
+# coder for minutes. soft uses compactionModel and can run in the background,
+# so soft goes first and the summary is written by that model.
+if [[ -n "$COMPACTION_MODEL" ]]; then
+  python3 - "$agent/models.yml" "$COMPACTION_MODEL" <<'PY'
+import pathlib, sys
+path, model = pathlib.Path(sys.argv[1]), sys.argv[2]
+text = path.read_text()
+anchor = "        contextWindow: 262144\n        maxTokens: 4096\n"
+if anchor not in text:
+    raise SystemExit(f"{path}: coder entry not found; update apply.sh")
+path.write_text(text.replace(anchor, anchor + f"        compactionModel: {model}\n", 1))
+print(f"coder compactionModel {model}")
+PY
+  overrides+=("softfirst")
+fi
 if (( ${#overrides[@]} )); then
   config_yml="$(mktemp --suffix=.yml)"
   python3 - "$root/agent/strata.config.yml" "$config_yml" "${overrides[@]}" <<'PY'
@@ -76,6 +93,9 @@ for item in overrides:
     if item.startswith("vision="):
         cfg.setdefault("modelRoles", {})["vision"] = item.split("=", 1)[1]
         print(f"modelRoles.vision {item.split('=', 1)[1]} (STRATA_VISION=off)")
+    elif item == "softfirst":
+        cfg.setdefault("compaction", {})["methodOrder"] = ["soft", "shake", "handoff"]
+        print("compaction.methodOrder soft, shake, handoff (COMPACTION_MODEL set)")
     elif item == "nofallback":
         cfg.setdefault("retry", {})["fallbackChains"] = {}
         cfg["retry"]["modelFallback"] = False
