@@ -75,10 +75,11 @@ if [[ -n "$COMPACTION_MODEL" ]]; then
 import pathlib, sys
 path, model = pathlib.Path(sys.argv[1]), sys.argv[2]
 text = path.read_text()
-anchor = "        contextWindow: 262144\n        maxTokens: 4096\n"
-if anchor not in text:
+import re
+m = re.search(r"        contextWindow: 262144\n        maxTokens: \d+\n", text)
+if not m:
     raise SystemExit(f"{path}: coder entry not found; update apply.sh")
-path.write_text(text.replace(anchor, anchor + f"        compactionModel: {model}\n", 1))
+path.write_text(text[:m.end()] + f"        compactionModel: {model}\n" + text[m.end():])
 print(f"coder compactionModel {model}")
 PY
   overrides+=("softfirst")
