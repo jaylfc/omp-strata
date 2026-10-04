@@ -8,7 +8,7 @@ Tested on omp 18.4.4 with `qwen3.8-flash-next-coder-iq1_m`, a 262144 context, an
 
 ## Updates come from this repo
 
-The running profile is this repository. `scripts/apply.sh` installs it into `~/.omp/profiles/omp-strata`, then merges `agent/strata.config.yml`. Inside imagelxc, a new commit that changes `agent/` or `bin/` restarts a running `omp-strata` session with `--continue`, in the directory it was running in, in a detached `screen` with the same name (reattach with `screen -r omp`). Commits that touch only docs, such as the daily `UPSTREAM.md` pin, leave the session running. It does not send `/goal resume`, so a goal session restarts paused.
+The running profile is this repository. `scripts/apply.sh` installs it into `~/.omp/profiles/omp-strata`, then merges `agent/strata.config.yml`. Extensions load at process start. When a new commit changes `agent/` or `bin/`, `self-update.sh` runs `~/.config/omp-strata/restart-hook` if that file is executable, so a long-running session can restart itself with `--continue`; without a hook it logs that a restart is needed. Commits that touch only docs, such as the daily `UPSTREAM.md` pin, do not run the hook.
 
 `omp` stays the upstream command and keeps using `~/.omp/agent`. `omp-strata` is `omp --profile=omp-strata` with this profile. `omp-strata update` pulls this repo. `omp update` stays the upstream updater.
 
@@ -167,7 +167,6 @@ scripts/config-pairs.py                  strata.config.yml -> `omp config set` p
 scripts/migrate-profile.sh               imagelxc one-time move of the old default agent
 scripts/self-update.sh                   pull this repo and install it
 scripts/host-self-update.sh              hourly host entry, runs the update in imagelxc
-scripts/restart-session.sh               relaunch omp-strata in screen after a profile change
 scripts/systemd/                         user timer for the hourly pull
 scripts/check-upstream.sh                compare the pin with upstream
 UPSTREAM.md                              tested omp, latest release, PR 14312

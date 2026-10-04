@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # Pull this repo and apply the omp-strata profile.
-# Inside imagelxc, a new commit that changes agent/ or bin/ restarts a running
-# omp-strata session. Doc-only commits, such as the daily UPSTREAM.md pin, do
-# not. It does not send /goal resume.
+# When a new commit changes agent/ or bin/, an executable
+# ~/.config/omp-strata/restart-hook runs so a live session can reload.
+# Doc-only commits, such as the daily UPSTREAM.md pin, do not run it.
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
+hook="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata/restart-hook"
 bash "$root/scripts/migrate-profile.sh"
 mkdir -p "${HOME}/.omp/profiles/omp-strata/logs"
 log="${HOME}/.omp/profiles/omp-strata/logs/omp-strata-update.log"
@@ -32,9 +33,9 @@ if [[ "$old" == "$new" ]]; then
   echo "already current"
 elif [[ -z "$(git diff --name-only "$old" "$new" -- agent bin)" ]]; then
   echo "updated ${old} -> ${new}; no profile files changed, session left running"
-elif [[ -x /opt/host-omp/omp ]]; then
-  echo "restarting omp-strata so the new profile loads"
-  bash "$root/scripts/restart-session.sh"
+elif [[ -x "$hook" ]]; then
+  echo "running $hook so the new profile loads"
+  "$hook"
 else
-  echo "updated ${old} -> ${new}"
+  echo "updated ${old} -> ${new}; restart omp-strata to load the new profile"
 fi
