@@ -34,6 +34,10 @@ const EXEMPT = new Set(["wait", "job", "irc", "yield", "todo", "goal"]);
  * trimming the model needs the same file again. Repeated failures still block.
  */
 const REPEAT_OK_ON_SUCCESS = new Set(["read", "grep", "glob", "find", "ls"]);
+/** Even read-only repeats stop here: one session re-read the same six lines 164 times. */
+const READ_REPEAT_LIMIT = 6;
+/** A-B-A-B-A-B: two calls alternating this many times in a row is a flip-flop loop. */
+const FLIPFLOP_CYCLES = 3;
 const INTENT_KEYS = new Set(["i", "__intent"]);
 
 interface FailureReport {
@@ -375,6 +379,18 @@ function completionReason(): string {
 	].join("\n");
 }
 
+function flipflopReason(a: string, b: string): string {
+	return [
+		`<system-interrupt reason="tool_call_loop_blocked">`,
+		`The last ${FLIPFLOP_CYCLES * 2} calls alternated between two actions and undid each other each time:`,
+		`- ${summarize(a, 200)}`,
+		`- ${summarize(b, 200)}`,
+		"",
+		"Pick the version the goal needs, keep it, and do not switch back. Verify it once, commit, and move to the next item.",
+		`</system-interrupt>`,
+	].join("\n");
+}
+
 function steerText(steers: number): string {
 	if (steers === 1) {
 		return [
@@ -430,6 +446,7 @@ export default function (pi: {
 	logger?: { warn?: (message: string, fields?: Record<string, unknown>) => void };
 }): void {
 	let run: Run | undefined;
+	const history: string[] = [];
 	let probeSeen: string | undefined;
 	let probeCount = 0;
 	let blockedSig: string | undefined;
@@ -504,6 +521,8 @@ export default function (pi: {
 		if (isOwnBlock(text)) return;
 		const next = signature(event.toolName, event.input);
 		run = extendRun(run, next, event.isError, reportFor(event.toolName, event.input, text));
+		history.push(next);
+		if (history.length > FLIPFLOP_CYCLES * 2) history.shift();
 	});
 
 	pi.on("tool_call", (event, ctx) => {
@@ -544,10 +563,18 @@ export default function (pi: {
 			return refuse(ctx, signature(event.toolName, event.input), probeReason(probed, probeCount));
 		}
 		const next = signature(event.toolName, event.input);
+		if (history.length === FLIPFLOP_CYCLES * 2) {
+			const [a, b] = history;
+			const alternating = a !== b && history.every((sig, i) => sig === (i % 2 === 0 ? a : b));
+			if (alternating && next === a) {
+				pi.logger?.warn?.("blocking flip-flop", { toolName: event.toolName });
+				return refuse(ctx, next, flipflopReason(a, b));
+			}
+		}
 		if (run && run.count >= BLOCK_AFTER && next === run.signature) {
 			pi.logger?.warn?.("blocking repeated tool call", { toolName: event.toolName, count: run.count });
 			if (run.allFailed && run.firstFailure) return refuse(ctx, next, failReason(run.firstFailure, run.count));
-			if (run.allSucceeded && REPEAT_OK_ON_SUCCESS.has(event.toolName)) return;
+			if (run.allSucceeded && REPEAT_OK_ON_SUCCESS.has(event.toolName) && run.count < READ_REPEAT_LIMIT) return;
 			if (run.allSucceeded) return refuse(ctx, next, successReason(run.last, run.count));
 			return refuse(ctx, next, repeatReason(run.last, run.count));
 		}
