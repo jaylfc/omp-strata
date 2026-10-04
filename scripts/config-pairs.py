@@ -12,8 +12,13 @@ try:
 except ImportError:
     sys.exit("apply.sh needs PyYAML (python3-yaml) to read strata.config.yml")
 
-config = yaml.safe_load(open(sys.argv[1]))
-known = set(json.load(open(sys.argv[2])))
+if len(sys.argv) != 3:
+    sys.exit("usage: config-pairs.py STRATA_CONFIG_YML OMP_CONFIG_LIST_JSON")
+try:
+    config = yaml.safe_load(open(sys.argv[1]))
+    known = set(json.load(open(sys.argv[2])))
+except (OSError, ValueError, yaml.YAMLError) as e:
+    sys.exit(f"config-pairs.py: {e}")
 out = sys.stdout.buffer
 
 

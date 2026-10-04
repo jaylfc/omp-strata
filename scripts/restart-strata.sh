@@ -33,7 +33,7 @@ if [[ -z "${cmd[-1]:-}" ]]; then
 fi
 srv_cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || echo /)"
 echo "stopping pid $pid; cwd $srv_cwd; log $log"
-kill -TERM "$pid"
+kill -TERM "$pid" 2>/dev/null || echo "pid $pid had already exited"
 for _ in $(seq 150); do
   kill -0 "$pid" 2>/dev/null || break
   sleep 0.2

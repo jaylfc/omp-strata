@@ -75,17 +75,18 @@ if [[ -n "$COMPACTION_MODEL" ]]; then
 import pathlib, sys
 path, model = pathlib.Path(sys.argv[1]), sys.argv[2]
 text = path.read_text()
-import re
+import json, re
 m = re.search(r"        contextWindow: 262144\n        maxTokens: \d+\n", text)
 if not m:
     raise SystemExit(f"{path}: coder entry not found; update apply.sh")
-path.write_text(text[:m.end()] + f"        compactionModel: {model}\n" + text[m.end():])
+path.write_text(text[:m.end()] + f"        compactionModel: {json.dumps(model)}\n" + text[m.end():])
 print(f"coder compactionModel {model}")
 PY
   overrides+=("softfirst")
 fi
 if (( ${#overrides[@]} )); then
   config_yml="$(mktemp --suffix=.yml)"
+  trap 'rm -f "$config_yml"' EXIT
   python3 - "$root/agent/strata.config.yml" "$config_yml" "${overrides[@]}" <<'PY'
 import sys, yaml
 src, dst, *overrides = sys.argv[1:]

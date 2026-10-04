@@ -178,6 +178,7 @@ try {
     }
   }
   if (report.pageErrors.length || (report.status ?? 0) >= 400) report.ok = false;
+  if (report.status === null && /^https?:/.test(opts.url)) report.ok = false;
 } catch (e) {
   report.ok = false;
   report.error = String(e?.message ?? e).split("\n")[0].slice(0, 300);
