@@ -376,7 +376,7 @@ export default function (pi: {
 		}
 		return {
 			model: SIDE_MODEL,
-			note: `Subagent pinned to ${SIDE_MODEL} so the coder keeps its prompt cache.`,
+			note: `Subagent pinned to ${SIDE_MODEL}. If that model does not answer, the call continues on the coder.`,
 		};
 	});
 	pi.on("session_start", reseed);

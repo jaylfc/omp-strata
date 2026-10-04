@@ -5,6 +5,19 @@ modelRoles:
   judge: mac/prism-ml/bonsai-27b
   task: mac/prism-ml/bonsai-27b
   smol: mac/prism-ml/bonsai-27b
+# The Mac is first. A failed request continues on the coder instead of dropping.
+# cooldown-expiry sends the next call back to the Mac after the suppression window.
+retry:
+  modelFallback: true
+  fallbackChains:
+    "mac/prism-ml/bonsai-27b":
+      - strata/qwen3.8-flash-next-coder-iq1_m
+    judge:
+      - strata/qwen3.8-flash-next-coder-iq1_m
+    task:
+      - strata/qwen3.8-flash-next-coder-iq1_m
+    smol:
+      - strata/qwen3.8-flash-next-coder-iq1_m
 compaction:
   methodOrder:
     - shake

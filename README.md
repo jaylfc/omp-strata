@@ -76,6 +76,8 @@ A vision call is a request on the only coder slot, so the following turn misses 
 
 `SIDE_MODEL` in `agent/extensions/fail-loop-resteer.ts` is `mac/prism-ml/bonsai-27b`. Every subagent, including eval `agent()`, is pinned to the Mac. Set it to `""` to refuse subagents when that provider is gone. `apply.sh` overwrites the extension, so the constant in this repo is the one that will be installed.
 
+`retry.fallbackChains` lists the coder under that Mac model and under `judge`, `task`, and `smol`. The Mac is still the first try. When the request fails, omp continues it on the coder instead of dropping the call. That uses the coder's only slot, so the next coder turn reads the prompt cold. `retry.fallbackRevertPolicy` stays `cooldown-expiry`, so a later call tries the Mac again after the suppression window.
+
 On the Mac this profile was exercised with, LM Studio serves `prism-ml/bonsai-27b` (MLX, 2-bit). Two server facts decide that entry:
 
 - omp sends images as WebP data URLs. LM Studio answers `400 'url' field must be a base64 encoded image` for those. The Mac model sets `imageInputDecoder: stb`, and so does the coder. A direct HTTP call must send `data:image/png;base64,...`.
