@@ -42,7 +42,7 @@ The coder stays the main model. Anything that is not the goal turn goes to a sec
 | Artifact spill | `tools.artifactSpillThreshold`, `artifactHeadBytes`, `artifactTailBytes` all `10` | These are kilobytes. Large tool output leaves the prompt. The head and tail that remain are short. |
 | `defaultThinkingLevel` | `minimal` | Lowest level omp accepts. The provider `extraBody` above is what stops coder thinking on an existing session. |
 | `RULES.md` | caveman lite, ponytail lite, and the vision paragraph | Re-sent every turn, so it stays short. Code, commands, paths, numbers, and error strings stay verbatim. |
-| Repeated calls | extension, after 3 identical arguments | The next identical call is refused whether the earlier calls failed, succeeded, or mixed. A pure failure streak tells the model to determine why, and includes the oldest failure text. A text turn does not reset the counter. `wait`, `job`, `irc`, `yield`, `todo`, and `goal` may repeat. The signature ignores `i` and `__intent`. |
+| Repeated calls | extension, after 3 identical arguments | The next identical call is refused whether the earlier calls failed, succeeded, or mixed. A pure failure streak tells the model to determine why, and includes the oldest failure text. A text turn does not reset the counter, and `--continue` rebuilds it from the session. The extension's own refusals do not count as runs. `wait`, `job`, `irc`, `yield`, `todo`, and `goal` may repeat. The signature ignores `i` and `__intent`. |
 | Game probes | 3 per script since the last edit or write | `where.mjs`, `touchprobe.mjs`, `menutest.mjs`, and the other `cinderline/tools/*.mjs` probes share a count even when the shell pipeline changes. `describe.mjs` is refused. Screenshot questions are `read <path>?q=<question>` or one `judge()` call, both on the Mac. |
 | `completion()` | refused | That eval helper calls the coder and replaces the prefix. |
 | `judge()` | allowed | It uses `modelRoles.judge`. With no judge role configured, the call errors; the 3-repeat block then stops a retry loop. |
@@ -103,7 +103,7 @@ After that:
 | `omp update` | Upstream's own updater. |
 | `omp-strata update` | `git pull` of this repo, then `scripts/install.sh`. |
 
-`install.sh` links `bin/omp-strata` into `~/.local/bin`, adds the `omp-strata` shell function to `~/.bashrc`, and runs `apply.sh`. `apply.sh` installs the extension, the `mac-mini` skill, `RULES.md`, and `models.yml`, and merges `agent/strata.config.yml` with `omp --profile=omp-strata config set`. Theme keys already in the profile `config.yml` stay.
+`install.sh` links `bin/omp-strata` into `~/.local/bin`, adds the `omp-strata` shell function to `~/.bashrc`, and runs `apply.sh`. `apply.sh` installs the extension, the `mac-mini` skill, `RULES.md`, and `models.yml`, and merges `agent/strata.config.yml` with `omp --profile=omp-strata config set`. Theme keys already in the profile `config.yml` stay. `strata.config.yml` is the only list of keys; `scripts/config-pairs.py` maps it onto `omp config list --json` and needs PyYAML (`python3-yaml`).
 
 Point Strata's OpenAI server at the machine where omp runs. This repo's `agent/models.yml` uses the imagelxc proxy, `http://127.0.0.1:18080/v1`. On imagelxc the same install restores `/usr/local/bin/omp` to the upstream binary and links `/usr/local/bin/omp-strata`. The first imagelxc install moves the old default `~/.omp/agent` into the profile, because that directory was this profile before the split.
 
@@ -144,6 +144,7 @@ agent/extensions/fail-loop-resteer.ts    loop re-steer, completion block, subage
 bin/omp-strata                          `omp --profile=omp-strata`; `update` pulls this repo
 scripts/install.sh                       link the command, alias it, and apply the profile
 scripts/apply.sh                         install into ~/.omp/profiles/omp-strata/agent
+scripts/config-pairs.py                  strata.config.yml -> `omp config set` pairs
 scripts/migrate-profile.sh               imagelxc one-time move of the old default agent
 scripts/self-update.sh                   pull this repo and install it
 scripts/host-self-update.sh              hourly host entry, runs the update in imagelxc
