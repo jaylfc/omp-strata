@@ -49,7 +49,7 @@ PY
 
 # webcheck: one-command real-browser page check for the coder (tools/webcheck).
 if command -v npm >/dev/null 2>&1; then
-  if (cd "$root/tools/webcheck" && npm install --silent --no-audit --no-fund >/dev/null); then
+  if (cd "$root/tools/webcheck" && timeout 600 npm install --silent --no-audit --no-fund >/dev/null); then
     chmod +x "$root/tools/webcheck/webcheck.mjs"
     ln -sfn "$root/tools/webcheck/webcheck.mjs" "${HOME}/.local/bin/webcheck"
     echo "linked ${HOME}/.local/bin/webcheck"

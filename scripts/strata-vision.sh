@@ -45,7 +45,15 @@ settings_dir="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata"
 mkdir -p "$settings_dir"
 # Update only this script's keys so other settings (SIDE_FALLBACK) stay.
 touch "$settings_dir/settings.env"
-grep -vE '^(STRATA_VISION|VISION_MODEL)=' "$settings_dir/settings.env" >"$settings_dir/settings.env.tmp" || true
+# grep exits 1 when nothing is left (fine) and 2 on a real error (stop before touching settings.env).
+rc=0
+grep -vE '^(STRATA_VISION|VISION_MODEL)=' "$settings_dir/settings.env" >"$settings_dir/settings.env.tmp" || rc=$?
+if (( rc > 1 )); then
+  echo "strata-vision: could not read $settings_dir/settings.env; left it unchanged" >&2
+  rm -f "$settings_dir/settings.env.tmp"
+  exit 1
+fi
+chmod --reference="$settings_dir/settings.env" "$settings_dir/settings.env.tmp" 2>/dev/null || true
 {
   echo "STRATA_VISION=$mode"
   [[ -n "$model" ]] && echo "VISION_MODEL=$model"

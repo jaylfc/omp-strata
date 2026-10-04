@@ -397,8 +397,15 @@ function trailingCycle(history: readonly string[]): number {
 
 /** "[path#TAG]" header omp prints on read and edit results. */
 function fileState(text: string): { path: string; tag: string } | undefined {
-	const m = /^\[([^\]#\s]+)#([0-9A-F]{3,8})\]/m.exec(text);
+	const m = /^\[([^\]#\s]+)#([0-9A-Fa-f]{3,8})\]/m.exec(text);
 	return m ? { path: m[1], tag: m[2] } : undefined;
+}
+
+/** True when an edit or write input targets exactly this path (its `path` field or a "[path#TAG]" header). */
+function editsPath(input: unknown, path: string): boolean {
+	const record = (input ?? {}) as { path?: unknown; input?: unknown };
+	if (record.path === path) return true;
+	return typeof record.input === "string" && record.input.includes(`[${path}#`);
 }
 
 function fileStateReason(path: string, tag: string, times: number): string {
@@ -492,10 +499,10 @@ export default function (pi: {
 		reason: string,
 	): { block: true; reason: string } => {
 		if (blockedSig === sig) {
-			steers++;
-			pi.logger?.warn?.("steering after a blocked call was repeated", { signature: sig, steers });
+			pi.logger?.warn?.("steering after a blocked call was repeated", { signature: sig, steers: steers + 1 });
 			try {
-				pi.sendUserMessage?.(steerText(steers), { deliverAs: "steer", attribution: "agent" });
+				pi.sendUserMessage?.(steerText(steers + 1), { deliverAs: "steer", attribution: "agent" });
+				steers++;
 			} catch {
 				// The refusal below still stops this call.
 			}
@@ -559,7 +566,9 @@ export default function (pi: {
 		if (history.length > MAX_CYCLE * FLIPFLOP_CYCLES) history.shift();
 		resultsSeen++;
 		// A commit, or 15 other calls, means the model has settled on a version and moved on.
-		const committed = event.toolName === "bash" && !event.isError && /git\s+commit/.test(JSON.stringify(event.input ?? ""));
+		const command = typeof (event.input as { command?: unknown })?.command === "string"
+			? (event.input as { command: string }).command : "";
+		const committed = event.toolName === "bash" && !event.isError && /(^|[;&|]\s*|\s)git\s+commit\b/.test(command);
 		if (frozenFile && (committed || resultsSeen - frozenFile.since > 15)) frozenFile = undefined;
 		if ((event.toolName === "edit" || event.toolName === "write") && !event.isError) {
 			const state = fileState(text);
@@ -619,7 +628,7 @@ export default function (pi: {
 			return refuse(ctx, next, flipflopReason(cycle));
 		}
 		if (frozenFile && (event.toolName === "edit" || event.toolName === "write") &&
-			JSON.stringify(event.input ?? "").includes(frozenFile.path)) {
+			editsPath(event.input, frozenFile.path)) {
 			pi.logger?.warn?.("blocking edit to a file that keeps reverting", { path: frozenFile.path });
 			return refuse(ctx, next, fileStateReason(frozenFile.path, frozenFile.tag, frozenFile.times));
 		}
