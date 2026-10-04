@@ -2,9 +2,11 @@
  * Local Strata guard for omp 18.4.4.
  *
  * Blocks the next identical call after the same arguments have been used 3
- * times, whether those calls failed or succeeded. Refuses eval code that
- * calls completion(), which would send that request to the coder. judge()
- * is allowed: point modelRoles.judge at the side model.
+ * times, whether those calls failed or succeeded. A refusal is a tool
+ * result, so the model can emit that call again. The second refusal of the
+ * same call aborts the turn. Refuses eval code that calls completion(),
+ * which would send that request to the coder. judge() is allowed: point
+ * modelRoles.judge at the side model.
  *
  * SIDE_MODEL pins every subagent (the task tool and eval agent()) to a
  * second model so the spawn does not take the coder's only request slot.
@@ -313,7 +315,13 @@ interface SessionContext {
 }
 
 export default function (pi: {
-	on(event: "tool_call", handler: (event: ToolCallShape) => { block?: boolean; reason?: string } | undefined): void;
+	on(
+		event: "tool_call",
+		handler: (
+			event: ToolCallShape,
+			ctx?: { abort?: () => void },
+		) => { block?: boolean; reason?: string } | undefined,
+	): void;
 	on(event: "tool_result", handler: (event: ToolResultShape) => void): void;
 	on(event: "session_start" | "session_switch", handler: (event: unknown, ctx: SessionContext) => void): void;
 	on(
@@ -325,11 +333,30 @@ export default function (pi: {
 	let run: Run | undefined;
 	let probeSeen: string | undefined;
 	let probeCount = 0;
+	let blockedSig: string | undefined;
+
+	const refuse = (
+		ctx: { abort?: () => void } | undefined,
+		sig: string,
+		reason: string,
+	): { block: true; reason: string } => {
+		if (blockedSig === sig) {
+			pi.logger?.warn?.("aborting turn after a blocked call was repeated", { signature: sig });
+			try {
+				ctx?.abort?.();
+			} catch {
+				// The block still stops this call when abort is unavailable.
+			}
+		}
+		blockedSig = sig;
+		return { block: true, reason };
+	};
 
 	const reseed = (_event: unknown, ctx: SessionContext): void => {
 		run = undefined;
 		probeSeen = undefined;
 		probeCount = 0;
+		blockedSig = undefined;
 		try {
 			const branch = ctx?.sessionManager?.getBranch?.();
 			if (Array.isArray(branch)) run = seedFromBranch(branch);
@@ -375,31 +402,31 @@ export default function (pi: {
 		run = extendRun(run, next, event.isError, reportFor(event.toolName, event.input, text));
 	});
 
-	pi.on("tool_call", event => {
+	pi.on("tool_call", (event, ctx) => {
 		if (event.toolName === "task" && !SIDE_MODEL) {
 			pi.logger?.warn?.("blocking subagent task on local model", { toolName: event.toolName });
-			return { block: true, reason: taskReason() };
+			return refuse(ctx, signature(event.toolName, event.input), taskReason());
 		}
 		if (EXEMPT.has(event.toolName)) return;
 		if (event.toolName === "eval" && callsCompletion(event.input)) {
 			pi.logger?.warn?.("blocking completion() on the coder", { toolName: event.toolName });
-			return { block: true, reason: completionReason() };
+			return refuse(ctx, signature(event.toolName, event.input), completionReason());
 		}
 		const probed = probeKey(event.input);
 		if (probed === "describe.mjs") {
 			pi.logger?.warn?.("blocking describe.mjs", { toolName: event.toolName });
-			return { block: true, reason: describeReason() };
+			return refuse(ctx, signature(event.toolName, event.input), describeReason());
 		}
 		if (probed && probed === probeSeen && probeCount >= BLOCK_AFTER) {
 			pi.logger?.warn?.("blocking repeated probe", { toolName: event.toolName, script: probed, count: probeCount });
-			return { block: true, reason: probeReason(probed, probeCount) };
+			return refuse(ctx, signature(event.toolName, event.input), probeReason(probed, probeCount));
 		}
 		const next = signature(event.toolName, event.input);
 		if (run && run.count >= BLOCK_AFTER && next === run.signature) {
 			pi.logger?.warn?.("blocking repeated tool call", { toolName: event.toolName, count: run.count });
-			if (run.allFailed && run.firstFailure) return { block: true, reason: failReason(run.firstFailure, run.count) };
-			if (run.allSucceeded) return { block: true, reason: successReason(run.last, run.count) };
-			return { block: true, reason: repeatReason(run.last, run.count) };
+			if (run.allFailed && run.firstFailure) return refuse(ctx, next, failReason(run.firstFailure, run.count));
+			if (run.allSucceeded) return refuse(ctx, next, successReason(run.last, run.count));
+			return refuse(ctx, next, repeatReason(run.last, run.count));
 		}
 	});
 }
