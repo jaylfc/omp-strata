@@ -35,10 +35,10 @@ The coder stays the main model. Anything that is not the goal turn goes to a sec
 | `title.refreshOnReplan` | `false` | A title call is another request. Also launch with `--no-title`. |
 | `provider.appendOnlyContext` | `on` | New turns append to the cached prefix instead of rewriting it. A healthy turn then reads a few dozen new tokens. |
 | Compaction method | `shake`, then `handoff`, then `soft` | Shake drops recoverable tool output and makes no model call. It only commits when the remainder is under the threshold. Handoff is the model summary. Soft is the local fallback. |
-| `compaction.thresholdTokens` | `32000` | Compact before the prompt is large enough for a multi-minute cold prefill. 32000 also fits a handoff inside Bonsai's loaded 41472 context. |
+| `compaction.thresholdTokens` | `65536` | On 2026-10-04 a 32000 threshold handed off four times in half an hour. Each summary took 140–225s on Strata and dropped about 10k tokens. A cached prompt read of 30k tokens took 1–3s, and a cold 25k read took about 25s. 65536 leaves about 45k tokens of room above `keepRecentTokens` and stays under the 100k–160k range where a cold prefill has taken minutes. |
 | `compaction.keepRecentTokens` | `20000` | The recent tail stays verbatim. The summary replaces what is older. |
 | `compaction.midTurnEnabled` | `true` | Compaction can run in the middle of a turn, so a long tool loop does not wait for the turn to end. |
-| `compaction.asyncEnabled` | `true` | Summarize in the background. The summary overlaps the coder turn because it uses the Mac provider. `maxInFlightRequests` is 1 for both `strata` and `mac`. |
+| `compaction.asyncEnabled` | `true` | A speculative summary can arm before the threshold. A mid-turn handoff that is not already armed still runs inline on the coder. omp 18.4.4 builds that request on the session model's prompt cache. |
 | Artifact spill | `tools.artifactSpillThreshold`, `artifactHeadBytes`, `artifactTailBytes` all `10` | These are kilobytes. Large tool output leaves the prompt. The head and tail that remain are short. |
 | `defaultThinkingLevel` | `minimal` | Lowest level omp accepts. The provider `extraBody` above is what stops coder thinking on an existing session. |
 | `RULES.md` | caveman lite, ponytail lite, and the vision paragraph | Re-sent every turn, so it stays short. Code, commands, paths, numbers, and error strings stay verbatim. |
@@ -62,7 +62,7 @@ Personal theme, symbol preset, and setup version are not part of the profile. `a
 | `modelRoles.judge` | `judge()` and `judgeBatch()`. |
 | `modelRoles.task` | The bundled task agent (`@task`). |
 | `modelRoles.smol` | Skill compression and other small calls that would otherwise look for a tiny model and then fall back toward the coder. |
-| Coder `compactionModel` | The handoff summary. |
+| Coder `compactionModel` | unset | Handoff does not use this field. Bonsai's loaded context is 41472, which cannot hold a prompt near 65536. A set value makes the soft fallback try the Mac, fail, and summarize on the coder anyway. |
 
 `SIDE_MODEL` at the top of `agent/extensions/fail-loop-resteer.ts` is `mac/prism-ml/bonsai-27b`. Every subagent, including eval `agent()`, is pinned to that selector. Set `SIDE_MODEL` to `""` to refuse subagents instead, which is the right sample behavior when the second provider does not exist. `apply.sh` overwrites the extension, so the constant in this repo is the one that will be installed.
 
@@ -71,9 +71,9 @@ On the Mac mini this profile was exercised with, LM Studio serves `prism-ml/bons
 - omp sends images as WebP data URLs. LM Studio answers `400 'url' field must be a base64 encoded image` for those. Set `imageInputDecoder: stb` on the model so omp re-encodes to PNG or JPEG first. A direct HTTP call must send `data:image/png;base64,...`.
 - The model thinks unless the request sets `reasoning_effort` to `none`. Thinking can spend the whole `max_tokens` budget and return empty content. Set `compat.extraBody.reasoning_effort: none`. Use `max_tokens` of at least 1500 for a direct call. A verified PNG description with that flag returned in a few seconds.
 
-LM Studio kept this MLX model at context 41472 even when asked for 65536 or 131072. Set the model's `contextWindow` to the loaded context, not the catalog maximum. A handoff prompt has to fit in that window minus `maxTokens`. With `maxTokens: 4096`, the live threshold is 32000 so the summary still fits. Leave `compactionModel` unset when the side model cannot hold a prompt near the threshold; omp would otherwise try it, fail, and fall back to the coder.
+LM Studio kept this MLX model at context 41472 even when asked for 65536 or 131072. Set the model's `contextWindow` to the loaded context, not the catalog maximum. Handoff stays on the coder, so the compaction threshold is not capped by that window. Leave `compactionModel` unset.
 
-`providers.maxInFlightRequests` for the side provider is `1` on that machine so a vision call, a subagent, and a handoff queue on the Mac instead of loading the 27B model twice. The coder's slot stays separate, so one Mac call can overlap one coder turn.
+`providers.maxInFlightRequests` for the side provider is `1` on that machine so a vision call and a subagent queue on the Mac instead of loading the 27B model twice. The coder's slot stays separate, so one Mac call can overlap one coder turn. Handoff stays on the coder.
 
 The `mac-mini` skill tells the agent which call to use. `RULES.md` stays the short always-on reminder. `apply.sh` replaces `RULES.md` from this repo on every install.
 

@@ -10,8 +10,8 @@ compaction:
     - shake
     - handoff
     - soft
-  # 32000 fits a handoff inside Bonsai's loaded 41472 context, minus maxTokens.
-  thresholdTokens: 32000
+  # 65536 stays under the 100k–160k cold-prefill range. Handoff runs on the coder.
+  thresholdTokens: 65536
   keepRecentTokens: 20000
   midTurnEnabled: true
   asyncEnabled: true

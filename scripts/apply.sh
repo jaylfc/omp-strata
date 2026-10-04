@@ -36,7 +36,7 @@ set_key() {
 
 set_key modelRoles '{"vision":"mac/prism-ml/bonsai-27b","judge":"mac/prism-ml/bonsai-27b","task":"mac/prism-ml/bonsai-27b","smol":"mac/prism-ml/bonsai-27b"}'
 set_key compaction.methodOrder '["shake","handoff","soft"]'
-set_key compaction.thresholdTokens 32000
+set_key compaction.thresholdTokens 65536
 set_key compaction.keepRecentTokens 20000
 set_key compaction.midTurnEnabled true
 set_key compaction.asyncEnabled true

@@ -24,4 +24,4 @@ Images must be PNG data URLs: `data:image/png;base64,...`. A WebP data URL is re
 
 ## Context
 
-The side model's `contextWindow` in `models.yml` must match the context LM Studio actually loaded. A handoff only leaves the coder when the coder's `compactionModel` is this model and `compaction.thresholdTokens` plus the summary budget fits in that window.
+The side model's `contextWindow` in `models.yml` must match the context LM Studio actually loaded. Handoff stays on the coder: omp 18.4.4 builds that summary on the session model's prompt cache. Leave the coder's `compactionModel` unset while `compaction.thresholdTokens` is above this context window.
