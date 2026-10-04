@@ -1,0 +1,27 @@
+name: upstream-pin
+
+on:
+  schedule:
+    # 08:17 UTC. GitHub schedules drift; this is a daily check, not an exact alarm.
+    - cron: "17 8 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Refresh upstream pin
+        run: bash scripts/check-upstream.sh --write
+      - name: Commit pin metadata
+        run: |
+          set -euo pipefail
+          git diff --exit-code -- UPSTREAM.md && exit 0
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add UPSTREAM.md
+          git commit -m "Note the current upstream omp release and PR 14312 head."
+          git push

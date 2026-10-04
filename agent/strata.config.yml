@@ -1,0 +1,22 @@
+# Merge these keys into ~/.omp/agent/config.yml.
+# omp config set does that. Replacing the whole file would drop theme and model roles.
+compaction:
+  methodOrder:
+    - shake
+    - handoff
+    - soft
+  thresholdTokens: 48000
+  keepRecentTokens: 20000
+  midTurnEnabled: true
+title:
+  refreshOnReplan: false
+provider:
+  appendOnlyContext: "on"
+tools:
+  artifactSpillThreshold: 10
+  artifactHeadBytes: 10
+  artifactTailBytes: 10
+defaultThinkingLevel: low
+providers:
+  maxInFlightRequests:
+    strata: 1
