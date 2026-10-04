@@ -6,9 +6,11 @@ Tested on omp 18.4.4 with `qwen3.8-flash-next-coder-iq1_m`, a 262144 context, an
 
 ## Updates come from this repo
 
-The running profile is this repository. imagelxc pulls `https://github.com/jaylfc/omp-strata.git` and `scripts/apply.sh` replaces `models.yml`, `RULES.md`, the extension, and the mac-mini skill, then merges `agent/strata.config.yml`. A new commit restarts the session omp with `--continue`. It does not send `/goal resume`.
+The running profile is this repository. `scripts/apply.sh` installs it into `~/.omp/profiles/omp-strata`, then merges `agent/strata.config.yml`. A new commit inside imagelxc restarts a running `omp-strata` session with `--continue`. It does not send `/goal resume`.
 
-`startup.checkUpdate` is false, so the omp binary does not offer upgrades from `can1357/oh-my-pi`. In imagelxc, `omp update` is the wrapper in `scripts/omp-wrapper.sh` and runs `scripts/self-update.sh`. The host timer `omp-strata-update.timer` runs `scripts/host-self-update.sh` hourly. The omp program itself stays the tested upstream binary. [UPSTREAM.md](UPSTREAM.md) only records that upstream tag. It does not install it.
+`omp` stays the upstream command and keeps using `~/.omp/agent`. `omp-strata` is `omp --profile=omp-strata` with this profile. `omp-strata update` pulls this repo. `omp update` stays the upstream updater.
+
+`startup.checkUpdate` is false on the profile, so `omp-strata` does not offer upgrades from `can1357/oh-my-pi`. The host timer `omp-strata-update.timer` runs `scripts/host-self-update.sh` hourly inside imagelxc. The omp program itself stays the tested upstream binary. [UPSTREAM.md](UPSTREAM.md) only records that upstream tag. It does not install it.
 
 RTK's generated `extensions/rtk.ts` is not in this repo. `rtk init` writes it, and a later RTK release replaces it.
 
@@ -79,35 +81,47 @@ The `mac-mini` skill tells the agent which call to use. `RULES.md` stays the sho
 - The installed omp binary. PR 14312 blocks the same failing tool call at ten and tells the model to determine why. This profile blocks at three, covers successes and mixed repeats, blocks `completion()`, and pins or refuses subagents. Those extras stay here.
 - Strata's listen address. It stays on `127.0.0.1:8080`.
 - The coder output cap, unless a measured generation is cut off at 4096.
-- The goal session. Extensions load at process start. Pickup is `/goal pause`, exit, `omp --continue --auto-approve --no-title`, then `/goal resume` on the same goal.
+- The goal session. Extensions load at process start. Pickup is `/goal pause`, exit, `omp-strata --continue --auto-approve --no-title`, then `/goal resume` on the same goal.
 
 ## Install
 
-1. Install upstream omp. This profile was tested on 18.4.4.
-2. Point Strata's OpenAI server at the machine where omp runs. This repo's `agent/models.yml` uses the imagelxc proxy, `http://127.0.0.1:18080/v1`.
-3. Apply the profile:
+Install upstream `omp` first. This profile was tested on 18.4.4. Then:
 
 ```bash
 git clone https://github.com/jaylfc/omp-strata.git
 cd omp-strata
-bash scripts/apply.sh
+bash scripts/install.sh
 ```
 
-`apply.sh` installs the extension, the `mac-mini` skill, `RULES.md`, and `models.yml` from this repo, and merges the keys in `agent/strata.config.yml` with `omp config set`. Theme keys already in `config.yml` stay. A later `git pull` of this repo is what updates a running install.
+After that:
 
-4. Install RTK 0.51.0 and let it write its extension.
+| Command | What it runs |
+| --- | --- |
+| `omp` | Upstream omp, state in `~/.omp/agent`. |
+| `omp-strata` | `omp --profile=omp-strata`, state in `~/.omp/profiles/omp-strata`. |
+| `omp update` | Upstream's own updater. |
+| `omp-strata update` | `git pull` of this repo, then `scripts/install.sh`. |
+
+`install.sh` links `bin/omp-strata` into `~/.local/bin`, adds the `omp-strata` shell function to `~/.bashrc`, and runs `apply.sh`. `apply.sh` installs the extension, the `mac-mini` skill, `RULES.md`, and `models.yml`, and merges `agent/strata.config.yml` with `omp --profile=omp-strata config set`. Theme keys already in the profile `config.yml` stay.
+
+Point Strata's OpenAI server at the machine where omp runs. This repo's `agent/models.yml` uses the imagelxc proxy, `http://127.0.0.1:18080/v1`. On imagelxc the same install restores `/usr/local/bin/omp` to the upstream binary and links `/usr/local/bin/omp-strata`. The first imagelxc install moves the old default `~/.omp/agent` into the profile, because that directory was this profile before the split.
+
+Install RTK 0.51.0 and let it write its extension.
 
 ```bash
 # https://github.com/rtk-ai/rtk/releases/tag/v0.51.0
 rtk init --agent omp --global --auto-patch
 ```
 
-5. Add the side provider and the four role keys when that model is up. Match `contextWindow` to the loaded context.
-6. Start omp again.
+`agent/models.yml` already names the side provider. Match its `contextWindow` to the loaded context before starting.
+
+Start in the project directory:
 
 ```bash
-omp --continue --auto-approve --no-title
+omp-strata --continue --auto-approve --no-title
 ```
+
+`--continue` uses the session saved for the current directory, so start it in the same directory as the original session.
 
 ## Daily upstream check
 
@@ -126,11 +140,13 @@ agent/strata.config.yml                  keys to merge
 agent/RULES.md                           always-on rules
 agent/skills/mac-mini/SKILL.md           when to use the side model
 agent/extensions/fail-loop-resteer.ts    loop re-steer, completion block, subagent pin
-scripts/apply.sh                         install into ~/.omp/agent
-scripts/self-update.sh                   pull this repo inside imagelxc and apply it
-scripts/host-self-update.sh              hourly host entry, runs the apply in imagelxc
-scripts/omp-wrapper.sh                   `omp update` pulls this repo
-scripts/restart-session.sh               relaunch the session omp after a new commit
+bin/omp-strata                          `omp --profile=omp-strata`; `update` pulls this repo
+scripts/install.sh                       link the command, alias it, and apply the profile
+scripts/apply.sh                         install into ~/.omp/profiles/omp-strata/agent
+scripts/migrate-profile.sh               imagelxc one-time move of the old default agent
+scripts/self-update.sh                   pull this repo and install it
+scripts/host-self-update.sh              hourly host entry, runs the update in imagelxc
+scripts/restart-session.sh               relaunch omp-strata after a new commit
 scripts/systemd/                         user timer for the hourly pull
 scripts/check-upstream.sh                compare the pin with upstream
 UPSTREAM.md                              tested omp, latest release, PR 14312

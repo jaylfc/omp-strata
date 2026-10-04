@@ -12,9 +12,16 @@ exec python3 - << 'PY'
 import ctypes, os, time
 
 def session_pid():
-    for line in os.popen("ps -eo pid,cmd").read().splitlines():
-        if "/opt/host-omp/omp --continue" in line and "awk" not in line:
-            return int(line.split(None, 1)[0])
+    for ent in os.listdir("/proc"):
+        if not ent.isdigit():
+            continue
+        try:
+            raw = open(f"/proc/{ent}/cmdline", "rb").read()
+        except OSError:
+            continue
+        cmd = raw.replace(b"\x00", b" ").decode(errors="replace")
+        if "--profile=omp-strata" in cmd and "--continue" in cmd:
+            return int(ent)
     return None
 
 pid = session_pid()
@@ -76,6 +83,6 @@ if pidfd < 0:
 got = libc.syscall(438, pidfd, master[1], 0)
 if got < 0:
     raise SystemExit(f"pidfd_getfd {ctypes.get_errno()}")
-os.write(got, b"\x15cd /home/jay/dev/strata/omp && /opt/host-omp/omp --continue --auto-approve --no-title\r")
+os.write(got, b"\x15cd /home/jay/dev/strata/omp && omp-strata --continue --auto-approve --no-title\r")
 print("relaunched")
 PY

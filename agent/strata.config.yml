@@ -1,4 +1,4 @@
-# Merge these keys into ~/.omp/agent/config.yml.
+# Merge these keys into ~/.omp/profiles/omp-strata/agent/config.yml.
 # omp config set does that. Replacing the whole file would drop the theme.
 modelRoles:
   vision: mac/prism-ml/bonsai-27b

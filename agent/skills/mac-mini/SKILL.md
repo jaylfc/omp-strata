@@ -5,7 +5,7 @@ description: Use the Mac mini side model for vision, screenshot questions, judge
 
 # Mac mini side model
 
-The coder is text-only and serves one request. A second request on that server drops the prompt cache. Vision, judge, and subagents go to the provider named `mac` in `~/.omp/agent/models.yml`.
+The coder is text-only and serves one request. A second request on that server drops the prompt cache. Vision, judge, and subagents go to the provider named `mac` in `~/.omp/profiles/omp-strata/agent/models.yml`.
 
 ## What to call
 

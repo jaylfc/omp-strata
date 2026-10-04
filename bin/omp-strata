@@ -1,0 +1,17 @@
+#!/bin/bash
+# omp-strata runs upstream omp with this profile.
+# `omp` itself stays the stock command and its own ~/.omp/agent.
+# `omp-strata update` pulls https://github.com/jaylfc/omp-strata.
+set -euo pipefail
+
+source="$(readlink -f "$0")"
+root="$(cd "$(dirname "$source")/.." && pwd)"
+
+if [[ "${1:-}" == "update" ]]; then
+  exec "$root/scripts/self-update.sh"
+fi
+
+if [[ -x /opt/host-omp/omp ]]; then
+  exec /opt/host-omp/omp --profile=omp-strata "$@"
+fi
+exec omp --profile=omp-strata "$@"
