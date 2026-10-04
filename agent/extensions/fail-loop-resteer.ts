@@ -5,8 +5,8 @@
  * times, whether those calls failed or succeeded. A refusal is a tool
  * result, so the model can emit that call again. When it does, the guard
  * steers the session with a message that asks for a new approach, so
- * autonomous work keeps going. After STEERS_BEFORE_ABORT steers on the same
- * call the turn is aborted. Refuses eval code that calls completion(),
+ * autonomous work keeps going. The guard never aborts: in omp an abort pauses
+ * the goal, so a loop would stop the whole autonomous run. Refuses eval code that calls completion(),
  * which would send that request to the coder. judge() is allowed: point
  * modelRoles.judge at the side model.
  *
@@ -26,11 +26,14 @@
  * the coder after that call has continued on the coder.
  */
 const BLOCK_AFTER = 3;
-/** Steers sent for one repeated refused call before the turn is aborted. */
-const STEERS_BEFORE_ABORT = 2;
 /** Empty string refuses subagents. A selector pins them to that model. */
 const SIDE_MODEL = "mac/google/gemma-4-12b-qat";
 const EXEMPT = new Set(["wait", "job", "irc", "yield", "todo", "goal"]);
+/**
+ * Read-only tools may repeat while they succeed: after compaction or output
+ * trimming the model needs the same file again. Repeated failures still block.
+ */
+const REPEAT_OK_ON_SUCCESS = new Set(["read", "grep", "glob", "find", "ls"]);
 const INTENT_KEYS = new Set(["i", "__intent"]);
 
 interface FailureReport {
@@ -439,20 +442,11 @@ export default function (pi: {
 	): { block: true; reason: string } => {
 		if (blockedSig === sig) {
 			steers++;
-			if (steers <= STEERS_BEFORE_ABORT && pi.sendUserMessage) {
-				pi.logger?.warn?.("steering after a blocked call was repeated", { signature: sig, steers });
-				try {
-					pi.sendUserMessage(steerText(steers), { deliverAs: "steer", attribution: "agent" });
-					return { block: true, reason };
-				} catch {
-					// Fall through to abort when the steer cannot be delivered.
-				}
-			}
-			pi.logger?.warn?.("aborting turn after a blocked call was repeated", { signature: sig, steers });
+			pi.logger?.warn?.("steering after a blocked call was repeated", { signature: sig, steers });
 			try {
-				ctx?.abort?.();
+				pi.sendUserMessage?.(steerText(steers), { deliverAs: "steer", attribution: "agent" });
 			} catch {
-				// The block still stops this call when abort is unavailable.
+				// The refusal below still stops this call.
 			}
 			return { block: true, reason };
 		}
@@ -553,6 +547,7 @@ export default function (pi: {
 		if (run && run.count >= BLOCK_AFTER && next === run.signature) {
 			pi.logger?.warn?.("blocking repeated tool call", { toolName: event.toolName, count: run.count });
 			if (run.allFailed && run.firstFailure) return refuse(ctx, next, failReason(run.firstFailure, run.count));
+			if (run.allSucceeded && REPEAT_OK_ON_SUCCESS.has(event.toolName)) return;
 			if (run.allSucceeded) return refuse(ctx, next, successReason(run.last, run.count));
 			return refuse(ctx, next, repeatReason(run.last, run.count));
 		}
