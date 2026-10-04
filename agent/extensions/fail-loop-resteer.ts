@@ -198,6 +198,47 @@ function callsCompletion(input: unknown): boolean {
 	return /\bcompletion\s*\(/.test(codeOf(input));
 }
 
+const PROBE_RE = /(?:where|touchprobe|menutest|doorwalk|firstsnap|battletest|smoke|xcheck)\.mjs/;
+
+function commandText(input: unknown): string {
+	if (!input || typeof input !== "object") return "";
+	const record = input as { command?: unknown; code?: unknown };
+	if (typeof record.command === "string") return record.command;
+	if (typeof record.code === "string") return record.code;
+	return "";
+}
+
+function probeKey(input: unknown): string | undefined {
+	const text = commandText(input);
+	if (/describe\.mjs/.test(text)) return "describe.mjs";
+	const match = text.match(PROBE_RE);
+	return match ? match[0] : undefined;
+}
+
+function describeReason(): string {
+	return [
+		`<system-interrupt reason="describe_mjs_blocked">`,
+		"describe.mjs was not run. It calls the side model from this turn and can spend the whole reply on thinking.",
+		"",
+		"For a saved screenshot, read <path>?q=<question>. For a pass/fail check, call judge() once in eval. Both use the Mac mini.",
+		"",
+		"Continue the current goal with that call.",
+		`</system-interrupt>`,
+	].join("\n");
+}
+
+function probeReason(script: string, count: number): string {
+	return [
+		`<system-interrupt reason="probe_repeat_blocked">`,
+		`${script} already ran ${count} times since the last edit. Another probe will not teach you more.`,
+		"",
+		"Use the numbers you have. After a screenshot, read <path>?q=<question> or call judge() once. Those run on the Mac mini.",
+		"",
+		"Continue the current goal with a different action. Edit the code before probing again.",
+		`</system-interrupt>`,
+	].join("\n");
+}
+
 function completionReason(): string {
 	return [
 		`<system-interrupt reason="completion_uses_coder">`,
@@ -252,6 +293,8 @@ export default function (pi: {
 	let repeatCount = 0;
 	let repeatSignature: string | undefined;
 	let repeatReport: FailureReport | undefined;
+	let probeSeen: string | undefined;
+	let probeCount = 0;
 
 	const clearFail = (): void => {
 		failCount = 0;
@@ -270,6 +313,8 @@ export default function (pi: {
 		repeatCount = 0;
 		repeatSignature = undefined;
 		repeatReport = undefined;
+		probeSeen = undefined;
+		probeCount = 0;
 		try {
 			const branch = ctx?.sessionManager?.getBranch?.();
 			if (!Array.isArray(branch)) return;
@@ -310,6 +355,18 @@ export default function (pi: {
 	pi.on("session_switch", reseed);
 
 	pi.on("tool_result", event => {
+		if (event.toolName === "edit" || event.toolName === "write") {
+			probeSeen = undefined;
+			probeCount = 0;
+		}
+		const probed = probeKey(event.input);
+		if (probed && probed !== "describe.mjs") {
+			if (probed === probeSeen) probeCount++;
+			else {
+				probeSeen = probed;
+				probeCount = 1;
+			}
+		}
 		if (EXEMPT.has(event.toolName)) return;
 		const next = signature(event.toolName, event.input);
 		const report = reportFor(event.toolName, event.input, resultText(event.content));
@@ -351,6 +408,15 @@ export default function (pi: {
 		if (event.toolName === "eval" && callsCompletion(event.input)) {
 			pi.logger?.warn?.("blocking completion() on the coder", { toolName: event.toolName });
 			return { block: true, reason: completionReason() };
+		}
+		const probed = probeKey(event.input);
+		if (probed === "describe.mjs") {
+			pi.logger?.warn?.("blocking describe.mjs", { toolName: event.toolName });
+			return { block: true, reason: describeReason() };
+		}
+		if (probed && probed === probeSeen && probeCount >= BLOCK_AFTER) {
+			pi.logger?.warn?.("blocking repeated probe", { toolName: event.toolName, script: probed, count: probeCount });
+			return { block: true, reason: probeReason(probed, probeCount) };
 		}
 		const next = signature(event.toolName, event.input);
 		if (repeatCount >= BLOCK_AFTER && repeatReport && next === repeatSignature) {

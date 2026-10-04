@@ -12,7 +12,7 @@ The coder is text-only and serves one request. A second request on that server d
 - Saved image: `read <path>?q=<question>`. This uses `modelRoles.vision`.
 - Screenshot classification, yes/no, ranking: `judge()` in eval. This uses `modelRoles.judge`. Batch questions in one call.
 - Side work, research, or a long look that should not sit on the coder: the `task` tool. The extension pins every subagent to `SIDE_MODEL` in `agent/extensions/fail-loop-resteer.ts`.
-- Numbers from the game, one probe: `cinderline/tools/where.mjs`, `touchprobe.mjs`, `menutest.mjs`, or one page evaluate. A mechanical image description is `node cinderline/tools/describe.mjs <image> ["prompt"]`.
+- Numbers from the game, one probe after an edit: `cinderline/tools/where.mjs`, `touchprobe.mjs`, or `menutest.mjs`. Do not run `describe.mjs`. It holds this turn and lets Bonsai think the budget away. Screenshot questions go through `read <path>?q=<question>` or one `judge()` call.
 
 `completion()` stays blocked. It would call the coder.
 

@@ -45,7 +45,7 @@ set_key provider.appendOnlyContext on
 set_key tools.artifactSpillThreshold 10
 set_key tools.artifactHeadBytes 10
 set_key tools.artifactTailBytes 10
-set_key defaultThinkingLevel low
+set_key defaultThinkingLevel off
 set_key startup.checkUpdate false
 set_key providers.maxInFlightRequests '{"strata":1,"mac":1}'
 

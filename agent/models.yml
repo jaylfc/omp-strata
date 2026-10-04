@@ -5,10 +5,12 @@ providers:
     auth: none
     compat:
       qwenTemplateReasoningEffort: true
+      extraBody:
+        reasoning_effort: none
     models:
       - id: qwen3.8-flash-next-coder-iq1_m
         name: Qwen3.8-Flash-Next Coder
-        reasoning: true
+        reasoning: false
         input: [text]
         contextWindow: 262144
         maxTokens: 4096

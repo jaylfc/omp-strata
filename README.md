@@ -27,7 +27,7 @@ The coder stays the main model. Anything that is not the goal turn goes to a sec
 | Provider id | `strata` | omp 18.2.7 and newer reserves the provider id `local` for tiny on-device models. |
 | `baseUrl` | `http://127.0.0.1:18080/v1` | Inside imagelxc the Incus proxy listens on 18080 and connects to host Strata on `127.0.0.1:8080`. Strata itself still listens on the host port only. |
 | `api` / `auth` | `openai-completions`, `auth: none` | Matches the local server. `auth: none` still counts as a configured credential, so omp will actually call it. |
-| `compat.qwenTemplateReasoningEffort` | `true` | Sends `reasoning_effort` for this Qwen server. Paired with `defaultThinkingLevel: low`. |
+| `compat.qwenTemplateReasoningEffort` plus `extraBody.reasoning_effort: none` | coder thinking off | `low` still spent the 4096 output budget on empty thinking. `extraBody` is applied after the template value, so `none` wins. The model entry is `reasoning: false`. |
 | Coder `input` | `[text]` | This quant does not accept images. Tool images are omitted from the coder request. |
 | Coder `contextWindow` | `262144` | The server is started with `--max-context 262144`. |
 | Coder `maxTokens` | `4096` | Measured generations on this model stopped on their own, largest well under 4096. Raising the cap does not speed the loop. |
@@ -40,9 +40,10 @@ The coder stays the main model. Anything that is not the goal turn goes to a sec
 | `compaction.midTurnEnabled` | `true` | Compaction can run in the middle of a turn, so a long tool loop does not wait for the turn to end. |
 | `compaction.asyncEnabled` | `true` | Summarize in the background. The summary overlaps the coder turn because it uses the Mac provider. `maxInFlightRequests` is 1 for both `strata` and `mac`. |
 | Artifact spill | `tools.artifactSpillThreshold`, `artifactHeadBytes`, `artifactTailBytes` all `10` | These are kilobytes. Large tool output leaves the prompt. The head and tail that remain are short. |
-| `defaultThinkingLevel` | `low` | Less thinking text on every coder turn. |
+| `defaultThinkingLevel` | `off` | Session default. The provider `extraBody` above is what stops coder thinking on an existing session. |
 | `RULES.md` | caveman lite, ponytail lite, and the vision paragraph | Re-sent every turn, so it stays short. Code, commands, paths, numbers, and error strings stay verbatim. |
 | Repeated calls | extension, after 3 identical arguments | The next identical call is refused whether the earlier calls failed, succeeded, or mixed. A pure failure streak tells the model to determine why, and includes the oldest failure text. A text turn does not reset the counter. `wait`, `job`, `irc`, `yield`, `todo`, and `goal` may repeat. The signature ignores `i` and `__intent`. |
+| Game probes | 3 per script since the last edit or write | `where.mjs`, `touchprobe.mjs`, `menutest.mjs`, and the other `cinderline/tools/*.mjs` probes share a count even when the shell pipeline changes. `describe.mjs` is refused. Screenshot questions are `read <path>?q=<question>` or one `judge()` call, both on the Mac. |
 | `completion()` | refused | That eval helper calls the coder and replaces the prefix. |
 | `judge()` | allowed | It uses `modelRoles.judge`. With no judge role configured, the call errors; the 3-repeat block then stops a retry loop. |
 | Subagents | pinned or refused | See the side-model section. |
