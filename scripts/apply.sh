@@ -37,12 +37,14 @@ fi
 # Local choices from scripts/strata-vision.sh. Updates keep them.
 STRATA_VISION=on
 VISION_MODEL=""
+SIDE_FALLBACK=on
 settings="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata/settings.env"
 if [[ -f "$settings" ]]; then
   # shellcheck disable=SC1090
   source "$settings"
 fi
 config_yml="$root/agent/strata.config.yml"
+overrides=()
 if [[ "$STRATA_VISION" == off ]]; then
   if [[ -z "$VISION_MODEL" ]]; then
     echo "STRATA_VISION=off needs VISION_MODEL in $settings; run scripts/strata-vision.sh off --model PROVIDER/MODEL" >&2
@@ -59,14 +61,26 @@ if old not in text:
 path.write_text(text.replace(old, "        input: [text]\n        imageInputDecoder: stb\n        contextWindow: 262144", 1))
 print("coder input [text] (STRATA_VISION=off)")
 PY
+  overrides+=("vision=$VISION_MODEL")
+fi
+# SIDE_FALLBACK=off: a failed side-model call errors instead of continuing on
+# the coder. Each fallback is a cold read on the coder and evicts its prompt cache.
+[[ "$SIDE_FALLBACK" == off ]] && overrides+=("nofallback")
+if (( ${#overrides[@]} )); then
   config_yml="$(mktemp --suffix=.yml)"
-  python3 - "$root/agent/strata.config.yml" "$config_yml" "$VISION_MODEL" <<'PY'
+  python3 - "$root/agent/strata.config.yml" "$config_yml" "${overrides[@]}" <<'PY'
 import sys, yaml
-src, dst, model = sys.argv[1:]
+src, dst, *overrides = sys.argv[1:]
 cfg = yaml.safe_load(open(src))
-cfg.setdefault("modelRoles", {})["vision"] = model
+for item in overrides:
+    if item.startswith("vision="):
+        cfg.setdefault("modelRoles", {})["vision"] = item.split("=", 1)[1]
+        print(f"modelRoles.vision {item.split('=', 1)[1]} (STRATA_VISION=off)")
+    elif item == "nofallback":
+        cfg.setdefault("retry", {})["fallbackChains"] = {}
+        cfg["retry"]["modelFallback"] = False
+        print("retry.modelFallback false, fallbackChains cleared (SIDE_FALLBACK=off)")
 yaml.safe_dump(cfg, open(dst, "w"), sort_keys=False)
-print(f"modelRoles.vision {model} (STRATA_VISION=off)")
 PY
 fi
 
