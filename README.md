@@ -2,7 +2,7 @@
 
 Profile for [oh-my-pi](https://github.com/can1357/oh-my-pi) pointed at one local [Strata](https://github.com/Niko1221/Strata) server. Install the upstream `omp` binary, then apply this profile on top. The running agent keeps using that upstream binary. This repo is the guide for that one-machine setup, not a second client fork. The only upstream code change is [oh-my-pi PR 14312](https://github.com/can1357/oh-my-pi/pull/14312), and that PR is only the generic identical-failure block at ten.
 
-The focus is a single card on one machine. Our setup also includes a Mac mini M4 with 24 GB, and we are experimenting with offloading judge calls and subtasks to it. Coding, vision, handoff, and smol stay on the Strata card either way. An install with no second machine does that same work on the card.
+The focus is a single card on one machine. Our setup also includes a Mac mini M4 with 24 GB, and we are experimenting with offloading judge calls, subagent chat, and subagent image reviews to it. Coding, handoff, smol, and the main session's screenshot questions stay on the Strata card. An install with no second machine does that work on the card.
 
 Tested on omp 18.4.4 with `qwen3.8-flash-next-coder-iq1_m`, a 262144 context, and one request in flight. Upstream is ahead of that pin. See [UPSTREAM.md](UPSTREAM.md).
 
@@ -20,7 +20,7 @@ RTK's generated `extensions/rtk.ts` is not in this repo. `rtk init` writes it, a
 
 Strata here serves one request at a time and keeps one prompt-cache prefix. The log line is `prompt N tokens = R reused + M read in M ms`. A different request in the middle (a subagent on the same server, a title, a judge call, a compaction handoff) makes the next coder turn cold. Decode is about 17–25 tokens/s. A cold prefill of 100k–160k tokens has taken minutes. Repeated identical tool calls cost the same.
 
-The coder stays the main model. Coding, screenshots, handoff, and smol all run on it, which is the path for a single card. Judge and subagents are the Mac mini experiment below: they try that machine when it is configured, and they continue on the coder when it does not answer.
+The coder stays the main model. Coding, the main session's screenshots, handoff, and smol all run on it, which is the path for a single card. Judge, subagent chat, and a subagent's image review are the Mac mini experiment below: they try that machine when it is configured, and they continue on the coder when it does not answer.
 
 ## Every setting
 
@@ -45,7 +45,7 @@ The coder stays the main model. Coding, screenshots, handoff, and smol all run o
 | `defaultThinkingLevel` | `minimal` | Lowest level omp accepts. The provider `extraBody` above is what stops coder thinking on an existing session. |
 | `RULES.md` | caveman lite, ponytail lite, and the vision paragraph | Re-sent every turn, so it stays short. Code, commands, paths, numbers, and error strings stay verbatim. |
 | Repeated calls | extension, after 3 identical arguments | The next identical call is refused whether the earlier calls failed, succeeded, or mixed. A pure failure streak tells the model to determine why, and includes the oldest failure text. Emitting that same call again aborts the turn. A text turn does not reset the counter, and `--continue` rebuilds it from the session. The extension's own refusals do not count as runs. `wait`, `job`, `irc`, `yield`, `todo`, and `goal` may repeat. The signature ignores `i` and `__intent`. |
-| Game probes | 3 per script since the last edit or write | `where.mjs`, `touchprobe.mjs`, `menutest.mjs`, and the other `cinderline/tools/*.mjs` probes share a count even when the shell pipeline changes. `describe.mjs` is refused. A screenshot question is `read <path>?q=<question>` on the coder. `judge()` tries the Mac, then the coder. |
+| Game probes | 3 per script since the last edit or write | `where.mjs`, `touchprobe.mjs`, `menutest.mjs`, and the other `cinderline/tools/*.mjs` probes share a count even when the shell pipeline changes. `describe.mjs` is refused. A screenshot question in the main session is `read <path>?q=<question>` on the coder. In a subagent, that read stays on the subagent's model. `judge()` tries the Mac, then the coder. |
 | `completion()` | refused | That eval helper calls the coder and replaces the prefix. |
 | `judge()` | allowed | It uses `modelRoles.judge`. With no judge role configured, the call errors; the 3-repeat block then stops a retry loop. |
 | Subagents | pinned or refused | See the side-model section. |
@@ -62,11 +62,13 @@ Personal theme, symbol preset, and setup version are not part of the profile. `a
 
 A vision call is a request on the only coder slot, so the following turn misses the prompt prefix. Handoff stays on the coder. Leave `compactionModel` unset.
 
+That path is the main session. omp 18.4.4 answers `read <path>?q=<question>` with `modelRoles.vision` through a direct call, and a busy Strata provider waits in `providers.maxInFlightRequests` instead of failing over. A subagent's copy of the extension rewrites that read so the image comes back to the subagent's own model. While the subagent is on the Mac, the review runs there and the coder keeps its slot. After a failed Mac request has continued the subagent on the coder, the same read returns the image on the coder. A one-machine install still answers the main session's screenshot questions on the card.
+
 `install.sh` runs the vision script when `STRATA_DIR` or `~/Strata` contains a Strata checkout. The omp profile still installs if that checkout is absent.
 
 ## The Mac mini experiment
 
-Our development setup includes a Mac mini M4 with 24 GB alongside the 12 GB Strata card. Offloading judge calls and subtasks to that Mac is an experiment. The repo's focus stays the single card. Coding, vision, handoff, and smol run on `strata/qwen3.8-flash-next-coder-iq1_m`, and an install with only that server still codes, reads screenshots, and compacts. Handoff stays on the coder. Leave `compactionModel` unset.
+Our development setup includes a Mac mini M4 with 24 GB alongside the 12 GB Strata card. Offloading judge calls, subagent chat, and subagent image reviews to that Mac is an experiment. The repo's focus stays the single card. Coding, the main session's screenshots, handoff, and smol run on `strata/qwen3.8-flash-next-coder-iq1_m`, and an install with only that server still codes, reads screenshots, and compacts. Handoff stays on the coder. Leave `compactionModel` unset.
 
 `modelRoles.smol` is the coder. omp uses that role to compress a skill description into one routing hint of at most 12 words, and small background calls use it when no separate tiny model is set. On 2026-10-04 the mac-mini skill prompt was 108 tokens and about 21 generated tokens. A warm coder answer took 1.6–2.2s. The same prompt on the Mac took 3.6–3.7s. Both answers were 14 or 15 words, so omp rejected them and kept the plain preview. That call does not walk `retry.fallbackChains`. It stops after 30s, so the role stays on the machine that is actually there. It is still one request on the coder's only slot. Titles stay off (`--no-title`, and `title.refreshOnReplan: false`) so a title does not add another.
 
@@ -74,7 +76,7 @@ Our development setup includes a Mac mini M4 with 24 GB alongside the 12 GB Stra
 
 | Role | Where it runs |
 | --- | --- |
-| `modelRoles.vision` | The Strata coder. `read <path>?q=<question>`. |
+| `modelRoles.vision` | The Strata coder, for the main session. A subagent's `read <path>?q=<question>` stays on the subagent's model. |
 | `modelRoles.judge` | The Mac first, then the coder. `judge()` and `judgeBatch()`. |
 | `modelRoles.task` | The Mac first, then the coder. The bundled task agent (`@task`). |
 | `modelRoles.smol` | The Strata coder. Skill compression and other small calls. |
@@ -89,7 +91,7 @@ On that Mac mini, LM Studio serves `prism-ml/bonsai-27b` (MLX, 2-bit). Two serve
 - omp sends images as WebP data URLs. LM Studio answers `400 'url' field must be a base64 encoded image` for those. The Mac model sets `imageInputDecoder: stb`, and so does the coder. A direct HTTP call must send `data:image/png;base64,...`.
 - The model thinks unless the request sets `reasoning_effort` to `none`. Thinking can spend the whole `max_tokens` budget and return empty content. Set `compat.extraBody.reasoning_effort: none`.
 
-`providers.maxInFlightRequests` for the Mac is `1`, so a judge call and a subagent queue there instead of loading the 27B model twice. The coder's slot stays separate, so one Mac call can overlap one coder turn. A vision call cannot: it is the coder turn.
+`providers.maxInFlightRequests` for the Mac is `1`, so a judge call and a subagent queue there instead of loading the 27B model twice. The coder's slot stays separate, so one Mac call can overlap one coder turn. A main-session vision call is a coder turn. A subagent image review runs on the subagent's model, so it overlaps the coder while the Mac is answering.
 
 The `mac-mini` skill tells the agent which call goes where. `RULES.md` stays the short always-on reminder. `apply.sh` replaces `RULES.md` from this repo on every install.
 

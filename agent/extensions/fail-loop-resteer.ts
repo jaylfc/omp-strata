@@ -15,6 +15,13 @@
  * includes the failure block from PR 14312.
  *
  * wait, job, irc, yield, todo, and goal are allowed to repeat.
+ *
+ * A subagent's read <path>?q=<question> stays on that subagent's model.
+ * The main session still uses modelRoles.vision on the coder. omp 18.4.4
+ * queues a second Strata request, and the image-question call does not
+ * walk retry.fallbackChains. The subagent model already accepts images,
+ * so the read returns the pixels there: the Mac while it is answering,
+ * the coder after that call has continued on the coder.
  */
 const BLOCK_AFTER = 3;
 /** Empty string refuses subagents. A selector pins them to that model. */
@@ -279,6 +286,43 @@ function probeReason(script: string, count: number): string {
 	].join("\n");
 }
 
+const IMAGE_FILE = /\.(png|jpe?g|gif|webp|bmp|svgz?)(?::img)?$/i;
+
+export interface ImageReviewModel {
+	input?: readonly string[];
+	provider?: string;
+	id?: string;
+}
+
+/**
+ * A subagent image question that should return pixels to the active model.
+ * Undefined leaves the call on modelRoles.vision.
+ */
+export function subagentImageReview(
+	toolName: string,
+	input: unknown,
+	agentKind: string | undefined,
+	model: ImageReviewModel | undefined,
+): { path: string; question: string } | undefined {
+	if (agentKind !== "sub" || toolName !== "read") return undefined;
+	if (!model?.input?.includes("image")) return undefined;
+	if (!input || typeof input !== "object") return undefined;
+	const raw = (input as { path?: unknown }).path;
+	if (typeof raw !== "string" || raw.includes("://")) return undefined;
+	const queryAt = raw.indexOf("?");
+	if (queryAt === -1) return undefined;
+	const question = new URLSearchParams(raw.slice(queryAt + 1)).get("q")?.trim();
+	if (!question) return undefined;
+	const path = raw.slice(0, queryAt);
+	if (!IMAGE_FILE.test(path)) return undefined;
+	return { path, question };
+}
+
+function imageReviewContext(question: string): string {
+	const text = question.length > 500 ? `${question.slice(0, 500)}…` : question;
+	return `The image question on this read was: ${text}`;
+}
+
 function completionReason(): string {
 	return [
 		`<system-interrupt reason="completion_uses_coder">`,
@@ -319,8 +363,8 @@ export default function (pi: {
 		event: "tool_call",
 		handler: (
 			event: ToolCallShape,
-			ctx?: { abort?: () => void },
-		) => { block?: boolean; reason?: string } | undefined,
+			ctx?: { abort?: () => void; agent?: { kind?: string }; model?: ImageReviewModel },
+		) => { block?: boolean; reason?: string; input?: Record<string, unknown>; additionalContext?: string } | undefined,
 	): void;
 	on(event: "tool_result", handler: (event: ToolResultShape) => void): void;
 	on(event: "session_start" | "session_switch", handler: (event: unknown, ctx: SessionContext) => void): void;
@@ -376,7 +420,7 @@ export default function (pi: {
 		}
 		return {
 			model: SIDE_MODEL,
-			note: `Subagent pinned to ${SIDE_MODEL}. If that model does not answer, the call continues on the coder.`,
+			note: `Subagent pinned to ${SIDE_MODEL}. If that model does not answer, the call continues on the coder. A read <path>?q=<question> image review stays on this subagent's model.`,
 		};
 	});
 	pi.on("session_start", reseed);
@@ -403,6 +447,17 @@ export default function (pi: {
 	});
 
 	pi.on("tool_call", (event, ctx) => {
+		const review = subagentImageReview(event.toolName, event.input, ctx?.agent?.kind, ctx?.model);
+		if (review) {
+			const model = ctx?.model;
+			pi.logger?.warn?.("subagent image review stays on the active model", {
+				model: model?.provider && model.id ? `${model.provider}/${model.id}` : "",
+			});
+			return {
+				input: { path: review.path },
+				additionalContext: imageReviewContext(review.question),
+			};
+		}
 		if (event.toolName === "task" && !SIDE_MODEL) {
 			pi.logger?.warn?.("blocking subagent task on local model", { toolName: event.toolName });
 			return refuse(ctx, signature(event.toolName, event.input), taskReason());

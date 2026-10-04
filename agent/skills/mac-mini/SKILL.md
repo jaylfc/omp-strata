@@ -1,6 +1,6 @@
 ---
 name: mac-mini
-description: Use the Mac mini for judge() and subagents. Screenshot questions go to the Strata coder with read ?q=, which uses its vision encoder and its one request slot.
+description: Use the Mac mini for judge() and subagents. A subagent image review stays on the subagent model. Main-session screenshots use read ?q= on the Strata coder.
 ---
 
 # Mac mini side model
@@ -9,7 +9,8 @@ The coder serves one request and reads images through Strata. A second request o
 
 ## What to call
 
-- Saved image: `read <path>?q=<question>`. This uses `modelRoles.vision` on the Strata coder. It takes the coder's only slot, so the next coder turn reads the prompt cold.
+- Saved image in the main session: `read <path>?q=<question>`. This uses `modelRoles.vision` on the Strata coder. It takes the coder's only slot, so the next coder turn reads the prompt cold.
+- Saved image in a subagent: the same `read <path>?q=<question>`. The extension returns the image on this subagent's model. That is the Mac while it answers. After the Mac call has continued on the coder, the image returns there.
 - Screenshot classification, yes/no, ranking: `judge()` in eval. This tries `modelRoles.judge` on the Mac. Batch questions in one call. If the Mac does not answer, omp continues that call on the coder.
 - Side work, research, or a long look that should not sit on the coder: the `task` tool. The extension pins every subagent to `SIDE_MODEL` in `agent/extensions/fail-loop-resteer.ts`. A failed Mac request continues on the coder.
 - Numbers from the game, one probe after an edit: `cinderline/tools/where.mjs`, `touchprobe.mjs`, or `menutest.mjs`. Do not run `describe.mjs`. It holds this turn and lets Bonsai think the budget away.
