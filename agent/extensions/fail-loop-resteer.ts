@@ -526,6 +526,8 @@ export default function (pi: {
 		probeCount = 0;
 		blockedSig = undefined;
 		steers = 0;
+		callSignatures.clear();
+		mismatchLogged = false;
 		try {
 			const branch = ctx?.sessionManager?.getBranch?.();
 			if (Array.isArray(branch)) run = seedFromBranch(branch);
