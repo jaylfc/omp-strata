@@ -366,7 +366,7 @@ export function subagentImageReview(
 	return { path, question };
 }
 
-const IMAGE_PATH = /(?:^|[\s"'`(])((?:\/|\.{1,2}\/)[^\s"'`)]+\.(?:png|jpe?g|webp))\b/gi;
+const IMAGE_PATH_SOURCE = /(?:^|[\s"'`(])((?:\/|\.{1,2}\/)[^\s"'`)]+\.(?:png|jpe?g|webp))\b/gi;
 const IMAGE_HINT_MARK = "read <path>?q=<question>";
 
 /**
@@ -380,7 +380,7 @@ export function addImageReadHint(input: unknown): Record<string, unknown> | unde
 	const tasks = record.tasks.map(item => {
 		const text = typeof item?.task === "string" ? item.task : "";
 		if (!text || text.includes(IMAGE_HINT_MARK)) return item;
-		const paths = [...new Set([...text.matchAll(IMAGE_PATH)].map(match => match[1]))];
+		const paths = [...new Set([...text.matchAll(new RegExp(IMAGE_PATH_SOURCE))].map(match => match[1]))];
 		if (paths.length === 0) return item;
 		changed = true;
 		return {
