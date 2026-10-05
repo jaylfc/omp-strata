@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Compare UPSTREAM.md with can1357/oh-my-pi. With --write, refresh the four
-# metadata lines when the latest release tag or PR 14312 has moved.
+# Compare UPSTREAM.md with can1357/oh-my-pi. With --write, refresh the two
+# metadata lines when the latest release tag has moved.
 # tested_omp is left as recorded.
 set -euo pipefail
 
@@ -29,26 +29,20 @@ field() {
 
 tested="$(field tested_omp)"
 recorded_tag="$(field upstream_latest_seen)"
-recorded_state="$(field pr_14312_state)"
-recorded_head="$(field pr_14312_head)"
 
 release_json="$(ghq release view --repo can1357/oh-my-pi --json tagName)"
-pr_json="$(ghq pr view 14312 --repo can1357/oh-my-pi --json state,headRefOid)"
 
-eval "$(RELEASE_JSON="$release_json" PR_JSON="$pr_json" python3 - <<'PY'
+eval "$(RELEASE_JSON="$release_json" python3 - <<'PY'
 import json, os, shlex
 release = json.loads(os.environ["RELEASE_JSON"])
-pr = json.loads(os.environ["PR_JSON"])
 print("live_tag=" + shlex.quote(release["tagName"]))
-print("live_state=" + shlex.quote(pr["state"]))
-print("live_head=" + shlex.quote(pr["headRefOid"]))
 PY
 )"
 
 seen_at="$(date -u +%Y-%m-%d)"
 
 metadata_stale=no
-if [[ "$recorded_tag" != "$live_tag" || "$recorded_state" != "$live_state" || "$recorded_head" != "$live_head" ]]; then
+if [[ "$recorded_tag" != "$live_tag" ]]; then
   metadata_stale=yes
 fi
 
@@ -62,14 +56,12 @@ fi
 
 status=current
 if [[ "$metadata_stale" == yes && "$write" == 1 ]]; then
-  LIVE_TAG="$live_tag" LIVE_STATE="$live_state" LIVE_HEAD="$live_head" SEEN_AT="$seen_at" python3 - <<'PY'
+  LIVE_TAG="$live_tag" SEEN_AT="$seen_at" python3 - <<'PY'
 import os
 from pathlib import Path
 repl = {
     "upstream_latest_seen": os.environ["LIVE_TAG"],
     "upstream_latest_seen_at": os.environ["SEEN_AT"],
-    "pr_14312_state": os.environ["LIVE_STATE"],
-    "pr_14312_head": os.environ["LIVE_HEAD"],
 }
 path = Path("UPSTREAM.md")
 lines = path.read_text().splitlines(keepends=True)
@@ -98,8 +90,4 @@ printf 'tested_omp: %s\n' "$tested"
 printf 'upstream_latest: %s\n' "$live_tag"
 printf 'recorded_latest: %s\n' "$recorded_tag"
 printf 'tested_behind: %s\n' "$tested_behind"
-printf 'pr_14312_state: %s\n' "$live_state"
-printf 'pr_14312_head: %s\n' "$live_head"
-printf 'recorded_pr_state: %s\n' "$recorded_state"
-printf 'recorded_pr_head: %s\n' "$recorded_head"
 printf 'metadata_stale: %s\n' "$metadata_stale"
