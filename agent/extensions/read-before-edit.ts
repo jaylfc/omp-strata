@@ -103,8 +103,10 @@ function pathOf(input: unknown): string | undefined {
 /** Path-like words of a bash command that views files. */
 export function viewedByBash(command: string): string[] {
 	if (!VIEW_RE.test(command)) return [];
-	const words = command.match(/[^\s'"`;&|<>()]+/g) ?? [];
-	return words.filter(word => !word.startsWith("-") && /[./]/.test(word) && !/^\d+(?:,\d+)?p?$/.test(word));
+	// Quoted words first, so "my file.txt" stays one path. recordResult keeps only words that exist as files.
+	const words: string[] = [];
+	for (const match of command.matchAll(/"([^"]+)"|'([^']+)'|([^\s'"`;&|<>()]+)/g)) words.push(match[1] ?? match[2] ?? match[3]);
+	return words.filter(word => !word.startsWith("-") && !/^\d+(?:,\d+)?p?$/.test(word));
 }
 
 /** Record every file a successful tool result shows the model. */
