@@ -6,8 +6,8 @@ providers:
     compat:
       qwenTemplateReasoningEffort: true
       extraBody:
-        reasoning_effort: low
-        reasoning_budget_tokens: 1536
+        reasoning_effort: medium
+        reasoning_budget_tokens: 3072
         temperature: 1.0
         top_p: 0.95
         top_k: 20
@@ -18,7 +18,7 @@ providers:
         input: [text, image]
         imageInputDecoder: stb
         contextWindow: 262144
-        maxTokens: 6144
+        maxTokens: 7168
         cost:
           input: 0
           output: 0
