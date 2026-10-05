@@ -22,9 +22,10 @@ compaction:
     - shake
     - handoff
     - soft
-  # 65536 stays under the 100k–160k cold-prefill range. Handoff runs on the coder.
-  thresholdTokens: 65536
-  keepRecentTokens: 20000
+  # The recent window must hold the files the model is working from, or shake drops them and the
+  # model re-reads them every few minutes. A cold 98,304-token read is ~100 s. Handoff runs on the coder.
+  thresholdTokens: 98304
+  keepRecentTokens: 40000
   midTurnEnabled: true
   asyncEnabled: true
 title:
