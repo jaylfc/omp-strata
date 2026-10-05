@@ -114,3 +114,14 @@ Planned additions to the extension:
 - `STRATA_SPEC_COUPLED=1`, to win back decode speed under sampling.
 - Strata PR #751 (disk KV cache across restarts) and PR #886 (empty assistant turns in history), once merged.
 - Why upstream 0.1.39 reused no prompt prefix in our test.
+
+## Read before edit
+
+omp 18.4.4 already refuses hashline edits on lines no read or search displayed (`edit.enforceSeenLines`, on by default), and it ties each edit to the file hash of the last read, so stale reads are refused too. The new `read-before-edit.ts` covers replace-mode edits and `write`. Replaying 5,252 recorded tool calls (1,405 bench and 3,847 Cinderline) through it:
+
+- **Edits:** 0 of 645 would have been refused. In the replace-mode bench arm the model read every file before editing it (25 edits, none failed).
+- **Edit failures:** the 156 that did happen were all hashline, and omp already catches the unseen-line ones (3 of the 34 bench failures).
+- **Writes:** these cannot be judged after the fact, because the replay sees today's files. Each of the 56 flagged writes created its file at the time.
+
+The guard therefore ships log-only, and the regular audits count its `would refuse` lines. It is switched on only if those show real cases and a bench A/B confirms it helps.
+
