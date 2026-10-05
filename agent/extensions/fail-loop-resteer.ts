@@ -52,6 +52,7 @@ interface FailureReport {
 interface ToolCallShape {
 	toolName: string;
 	input: unknown;
+	toolCallId?: string;
 }
 
 interface ToolResultShape extends ToolCallShape {
@@ -492,6 +493,12 @@ export default function (pi: {
 	let probeCount = 0;
 	let blockedSig: string | undefined;
 	let steers = 0;
+	/**
+	 * Signature each call had when tool_call saw it, by call id. omp hands tool_result a transformed
+	 * copy of the arguments, so recomputing the signature there can split one run of identical calls.
+	 */
+	const callSignatures = new Map<string, string>();
+	let mismatchLogged = false;
 
 	const refuse = (
 		ctx: { abort?: () => void } | undefined,
@@ -560,7 +567,14 @@ export default function (pi: {
 		if (EXEMPT.has(event.toolName)) return;
 		const text = resultText(event.content);
 		if (isOwnBlock(text)) return;
-		const next = signature(event.toolName, event.input);
+		const recomputed = signature(event.toolName, event.input);
+		const seen = event.toolCallId ? callSignatures.get(event.toolCallId) : undefined;
+		if (event.toolCallId) callSignatures.delete(event.toolCallId);
+		if (seen && seen !== recomputed && !mismatchLogged) {
+			mismatchLogged = true;
+			pi.logger?.warn?.("tool_result input differs from tool_call input", { atCall: seen, atResult: recomputed });
+		}
+		const next = seen ?? recomputed;
 		run = extendRun(run, next, event.isError, reportFor(event.toolName, event.input, text));
 		history.push(next);
 		if (history.length > MAX_CYCLE * FLIPFLOP_CYCLES) history.shift();
@@ -621,6 +635,11 @@ export default function (pi: {
 			return refuse(ctx, signature(event.toolName, event.input), probeReason(probed, probeCount));
 		}
 		const next = signature(event.toolName, event.input);
+		if (event.toolCallId) {
+			callSignatures.set(event.toolCallId, next);
+			// Blocked calls never reach tool_result; keep the map from growing without bound.
+			if (callSignatures.size > 64) callSignatures.delete(callSignatures.keys().next().value as string);
+		}
 		const len = trailingCycle(history);
 		if (len && next === history[history.length - len]) {
 			const cycle = history.slice(-len);
