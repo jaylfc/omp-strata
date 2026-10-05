@@ -366,6 +366,31 @@ export function subagentImageReview(
 	return { path, question };
 }
 
+const IMAGE_PATH_SOURCE = /(?:^|[\s"'`(])((?:\/|\.{1,2}\/)[^\s"'`)]+\.(?:png|jpe?g|webp))\b/gi;
+const IMAGE_HINT_MARK = "read <path>?q=<question>";
+
+/**
+ * A subagent given screenshot paths does not know it can see them: on 2026-10-05 the side model
+ * answered "I cannot see or review images" and no visual check happened. Tell each task how.
+ */
+export function addImageReadHint(input: unknown): Record<string, unknown> | undefined {
+	const record = input as { tasks?: Array<{ task?: unknown }> } | undefined;
+	if (!record || !Array.isArray(record.tasks)) return undefined;
+	let changed = false;
+	const tasks = record.tasks.map(item => {
+		const text = typeof item?.task === "string" ? item.task : "";
+		if (!text || text.includes(IMAGE_HINT_MARK)) return item;
+		const paths = [...new Set([...text.matchAll(new RegExp(IMAGE_PATH_SOURCE))].map(match => match[1]))];
+		if (paths.length === 0) return item;
+		changed = true;
+		return {
+			...item,
+			task: `${text}\n\nYou can see these images. For each one, call the read tool with the path followed by ?q= and your question, for example read ${paths[0]}?q=<question>, and base every verdict on what that returns. Do not answer before reading each image: ${paths.join(", ")}. (${IMAGE_HINT_MARK})`,
+		};
+	});
+	return changed ? { ...(input as Record<string, unknown>), tasks } : undefined;
+}
+
 function imageReviewContext(question: string): string {
 	const text = question.length > 500 ? `${question.slice(0, 500)}…` : question;
 	return `The image question on this read was: ${text}`;
@@ -614,6 +639,13 @@ export default function (pi: {
 		if (event.toolName === "task" && !SIDE_MODEL) {
 			pi.logger?.warn?.("blocking subagent task on local model", { toolName: event.toolName });
 			return refuse(ctx, signature(event.toolName, event.input), taskReason());
+		}
+		if (event.toolName === "task") {
+			const withHint = addImageReadHint(event.input);
+			if (withHint) {
+				pi.logger?.warn?.("added image-read hint to subagent tasks", { toolName: event.toolName });
+				return { input: withHint };
+			}
 		}
 		if (EXEMPT.has(event.toolName)) return;
 		if (event.toolName === "eval") {
