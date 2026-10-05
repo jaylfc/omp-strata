@@ -1,6 +1,6 @@
 # omp-strata
 
-Profile for [oh-my-pi](https://github.com/can1357/oh-my-pi) pointed at one local [Strata](https://github.com/Niko1221/Strata) server. Install the upstream `omp` binary, then apply this profile on top. The running agent keeps using that upstream binary. This repo is the guide for that one-machine setup, not a second client fork. The only upstream code change is [oh-my-pi PR 14312](https://github.com/can1357/oh-my-pi/pull/14312), and that PR is only the generic identical-failure block at ten.
+Profile for [oh-my-pi](https://github.com/can1357/oh-my-pi) pointed at one local [Strata](https://github.com/Niko1221/Strata) server. Install the upstream `omp` binary, then apply this profile on top. The running agent keeps using that upstream binary. This repo is the guide for that one-machine setup, not a second client fork. omp itself runs unmodified; every change lives in this profile.
 
 The focus is a single card on one machine. Our setup also includes a Mac mini M4 with 24 GB, and we are experimenting with offloading judge calls, subagent chat, and subagent image reviews to it. Coding, handoff, smol, and the main session's screenshot questions stay on the Strata card. An install with no second machine does that work on the card.
 
@@ -121,7 +121,7 @@ The `mac-mini` skill tells the agent which call goes where. `RULES.md` stays the
 
 ## What this profile does not change
 
-- The installed omp binary. PR 14312 blocks the same failing tool call at ten and tells the model to determine why. This profile blocks at three, covers successes and mixed repeats, blocks `completion()`, and pins or refuses subagents. Those extras stay here.
+- The installed omp binary. Loop handling (blocking at three, covering successes and mixed repeats, blocking `completion()`, pinning or refusing subagents) lives in this profile's extension.
 - Strata's listen address. It stays on `127.0.0.1:8080`.
 - The coder output cap, unless a measured generation is cut off at 4096.
 - The goal session. Extensions load at process start. Pickup is `/goal pause`, exit, `omp-strata --continue --auto-approve --no-title`, then `/goal resume` on the same goal.
@@ -168,7 +168,7 @@ omp-strata --continue --auto-approve --no-title
 
 ## Daily upstream check
 
-`.github/workflows/upstream-pin.yml` runs every day at 08:17 UTC, and on demand. It compares [UPSTREAM.md](UPSTREAM.md) with the newest can1357/oh-my-pi release and with PR 14312. When the release tag or the PR head has moved, it commits those four lines. It leaves `tested_omp` as recorded, and it does not replace an installed omp binary.
+`.github/workflows/upstream-pin.yml` runs every day at 08:17 UTC, and on demand. It compares [UPSTREAM.md](UPSTREAM.md) with the newest can1357/oh-my-pi release. When the release tag has moved, it commits those two lines. It leaves `tested_omp` as recorded, and it does not replace an installed omp binary.
 
 ```bash
 bash scripts/check-upstream.sh
@@ -196,6 +196,6 @@ scripts/self-update.sh                   pull this repo and install it
 scripts/host-self-update.sh              hourly host entry, runs the update in imagelxc
 scripts/systemd/                         user timer for the hourly pull
 scripts/check-upstream.sh                compare the pin with upstream
-UPSTREAM.md                              tested omp, latest release, PR 14312
+UPSTREAM.md                              tested omp, latest release
 FINDINGS.md                              measured results behind the settings
 ```

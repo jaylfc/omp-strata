@@ -13,8 +13,7 @@
  * SIDE_MODEL pins every subagent (the task tool and eval agent()) to a
  * second model so the spawn does not take the coder's only request slot.
  * Set it to "" to refuse subagents instead. The provider id and model id
- * must exist in models.yml. Remove the fail-loop half once an omp build
- * includes the failure block from PR 14312.
+ * must exist in models.yml.
  *
  * wait, job, irc, yield, todo, and goal are allowed to repeat.
  *
@@ -60,14 +59,19 @@ interface ToolResultShape extends ToolCallShape {
 	content: Array<{ type?: string; text?: string }>;
 }
 
-function canonicalize(value: unknown): unknown {
-	if (Array.isArray(value)) return value.map(item => canonicalize(item));
+/**
+ * Arguments in a stable key order, without omp's intent note. omp adds the note as a top-level string field
+ * (`i` or `__intent`); a tool's own argument with that name (a nested field, or a number) is kept, so two calls
+ * that differ only there stay different.
+ */
+function canonicalize(value: unknown, topLevel = true): unknown {
+	if (Array.isArray(value)) return value.map(item => canonicalize(item, false));
 	if (!value || typeof value !== "object") return value;
 	const input = value as Record<string, unknown>;
 	const output: Record<string, unknown> = {};
 	for (const key of Object.keys(input).sort()) {
-		if (INTENT_KEYS.has(key)) continue;
-		output[key] = canonicalize(input[key]);
+		if (topLevel && INTENT_KEYS.has(key) && typeof input[key] === "string") continue;
+		output[key] = canonicalize(input[key], false);
 	}
 	return output;
 }
