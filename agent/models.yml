@@ -8,6 +8,9 @@ providers:
       extraBody:
         reasoning_effort: low
         reasoning_budget_tokens: 1536
+        temperature: 1.0
+        top_p: 0.95
+        top_k: 20
     models:
       - id: qwen3.8-flash-next-coder-iq1_m
         name: Qwen3.8-Flash-Next Coder
