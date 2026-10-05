@@ -121,7 +121,7 @@ omp 18.4.4 already refuses hashline edits on lines no read or search displayed (
 
 - **Edits:** 0 of 645 would have been refused. In the replace-mode bench arm the model read every file before editing it (25 edits, none failed).
 - **Edit failures:** the 156 that did happen were all hashline, and omp already catches the unseen-line ones (3 of the 34 bench failures).
-- **Writes:** these cannot be judged after the fact, because the replay sees today's files. The 56 flagged writes that were checked had created new files, which the live guard allows.
+- **Writes:** these cannot be judged after the fact, because the replay sees today's files. 56 writes were flagged; the 8 inspected all created new files, which the live guard allows.
 
 The guard therefore ships log-only, and the regular audits count its `would refuse` lines. It is switched on only if those show real cases and a bench A/B confirms it helps.
 
