@@ -6,6 +6,8 @@ The focus is a single card on one machine. Our setup also includes a Mac mini M4
 
 Tested on omp 18.4.4 with `qwen3.8-flash-next-coder-iq1_m`, a 262144 context, and one request in flight. Upstream is ahead of that pin. See [UPSTREAM.md](UPSTREAM.md).
 
+Measured results behind these settings (thinking level, sampling, compaction, engine, loop guard) are in [FINDINGS.md](FINDINGS.md). The short version: medium thinking with a 3072-token budget, Qwen's thinking sampling instead of Strata's greedy default, and compaction at 98304 tokens with a 40000-token recent window.
+
 ## Updates come from this repo
 
 The running profile is this repository. `scripts/apply.sh` installs it into `~/.omp/profiles/omp-strata`, then merges `agent/strata.config.yml`. Extensions load at process start. When a new commit changes `agent/` or `bin/`, `self-update.sh` runs `~/.config/omp-strata/restart-hook` if that file is executable, so a long-running session can restart itself with `--continue`; without a hook it logs that a restart is needed. Commits that touch only docs, such as the daily `UPSTREAM.md` pin, do not run the hook.
@@ -195,4 +197,5 @@ scripts/host-self-update.sh              hourly host entry, runs the update in i
 scripts/systemd/                         user timer for the hourly pull
 scripts/check-upstream.sh                compare the pin with upstream
 UPSTREAM.md                              tested omp, latest release, PR 14312
+FINDINGS.md                              measured results behind the settings
 ```
