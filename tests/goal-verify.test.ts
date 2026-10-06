@@ -121,3 +121,34 @@ describe("exit codes decide", () => {
 		expect(v.decideComplete(s, "on", 2000).reason).toContain("No verify_item has run");
 	});
 });
+
+describe("heuristic fallback (Kilo review)", () => {
+	test("a failed heuristic probe is not evidence", () => {
+		const s = goal();
+		v.decideComplete(s, "on", 1000);
+		v.recordResult(s, { toolName: "bash", input: { command: "node tools/probe.mjs" }, isError: true, details: { exitCode: 1 }, content: [{ type: "text", text: "boom" }] }, 1500);
+		expect(v.decideComplete(s, "on", 2000).block).toBe(true);
+	});
+	test("the newest heuristic probe failing blocks even after an earlier pass", () => {
+		const s = goal();
+		v.decideComplete(s, "on", 1000);
+		probe(s, 1200);
+		v.recordResult(s, { toolName: "bash", input: { command: "node tools/probe.mjs" }, isError: true, details: { exitCode: 1 } }, 1500);
+		expect(v.decideComplete(s, "on", 2000).block).toBe(true);
+	});
+	test("background jobs count by exit code", () => {
+		const s = goal();
+		v.recordResult(s, { toolName: "bash", input: { command: "node tools/probe.mjs" }, content: [{ type: "text", text: "Backgrounded as job bg_7; its output is injected" }] }, 500);
+		v.decideComplete(s, "on", 1000);
+		const failed = [{ type: "custom_message", customType: "async-result", content: "Background job bg_7 has completed.\nboom\nCommand exited with code 2", timestamp: 1500 }];
+		expect(v.decideComplete(s, "on", 2000, failed as never).block).toBe(true);
+		const passed = [{ type: "custom_message", customType: "async-result", content: "Background job bg_7 has completed.\nall good", timestamp: 2500 }];
+		expect(v.decideComplete(s, "on", 3000, passed as never).block).toBeFalsy();
+	});
+	test("an async result for an unknown job does not count", () => {
+		const s = goal();
+		v.decideComplete(s, "on", 1000);
+		const unknown = [{ type: "custom_message", customType: "async-result", content: "Background job bg_9 has completed.\nok", timestamp: 1500 }];
+		expect(v.decideComplete(s, "on", 2000, unknown as never).block).toBe(true);
+	});
+});

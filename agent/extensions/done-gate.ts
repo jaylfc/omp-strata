@@ -455,7 +455,7 @@ export function record(state: GateState, result: ToolResult, at: number): void {
 }
 
 /** Background jobs that finished with exit code 0, from async-result messages in the branch. */
-export function asyncPasses(state: GateState, branch: readonly BranchEntry[] | undefined): Probe[] {
+export function asyncPasses(state: Pick<GateState, "jobs">, branch: readonly BranchEntry[] | undefined): Probe[] {
 	if (!Array.isArray(branch)) return [];
 	const out: Probe[] = [];
 	for (const entry of branch) {

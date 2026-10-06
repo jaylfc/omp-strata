@@ -26,7 +26,7 @@
  *
  * OMP_STRATA_GOAL_VERIFY: on (default), log, off.
  */
-import { type BranchEntry, classifyResult, envMode, isProbeCommand, textOf, type ToolResult, type Verification, verificationOf } from "./done-gate.ts";
+import { asyncPasses, type BranchEntry, classifyResult, envMode, textOf, type ToolResult, type Verification, verificationOf } from "./done-gate.ts";
 
 export const VERIFY_MARKER = `<system-interrupt reason="goal_verify">`;
 export const MAX_REFUSALS = 3;
@@ -39,13 +39,16 @@ export interface VerifyState {
 	requestedAt?: number;
 	refusals: number;
 	verified: boolean;
-	probes: number[];
+	/** Heuristic probes (bash/eval), passing or not, for the fallback when no verify_item ran. */
+	probes: Array<{ at: number; pass: boolean }>;
+	/** Background job id -> command, to read async results by exit code. */
+	jobs: Map<string, string>;
 	replies: Array<{ at: number; text: string }>;
 	verifications: Verification[];
 }
 
 export function newVerifyState(): VerifyState {
-	return { clock: 0, refusals: 0, verified: false, probes: [], replies: [], verifications: [] };
+	return { clock: 0, refusals: 0, verified: false, probes: [], jobs: new Map(), replies: [], verifications: [] };
 }
 
 function tick(state: VerifyState, at: number): number {
@@ -83,7 +86,9 @@ export function recordResult(state: VerifyState, result: ToolResult, at: number)
 		state.verifications.push({ ...verified, at: now });
 		return;
 	}
-	if (classifyResult(result)) state.probes.push(now);
+	const probe = classifyResult(result);
+	if (probe?.kind === "background" && probe.job) state.jobs.set(probe.job, probe.command);
+	else if (probe) state.probes.push({ at: now, pass: probe.kind === "pass" });
 }
 
 export function recordReply(state: VerifyState, text: string, at: number): void {
@@ -97,20 +102,6 @@ export function failLines(text: string): string[] {
 		.map(line => line.trim())
 		.filter(line => /\bFAIL(?:ED|S)?\b/.test(line) && !/\bPASS(?:ED|ES)?\b/.test(line))
 		.map(line => (line.length > 160 ? `${line.slice(0, 159)}…` : line));
-}
-
-function asyncProbeTimes(branch: readonly BranchEntry[] | undefined, since: number): number[] {
-	if (!Array.isArray(branch)) return [];
-	const out: number[] = [];
-	for (const entry of branch) {
-		if (entry?.type !== "custom_message" || entry.customType !== "async-result") continue;
-		const at = typeof entry.timestamp === "string" ? Date.parse(entry.timestamp) : Number(entry.timestamp);
-		if (!(at > since)) continue;
-		const text = textOf(entry.content);
-		const inline = [...text.matchAll(/── Job \S+ \((.*)\) ──/g)].map(m => m[1]);
-		if (inline.length === 0 || inline.some(isProbeCommand)) out.push(at);
-	}
-	return out;
 }
 
 export function checklist(objective: string | undefined): string {
@@ -173,13 +164,16 @@ export function decideComplete(state: VerifyState, mode: "on" | "log", now: numb
 	for (const v of state.verifications) if (v.at > since) latest.set(v.task.trim().toLowerCase(), v);
 	const runs = [...latest.values()];
 	const failed = runs.filter(v => v.exit !== 0);
-	const probes = state.probes.filter(t => t > since).length + asyncProbeTimes(branch, since).length;
+	// The fallback when no verify_item ran: heuristic probes and background jobs, judged by exit code.
+	const heuristic = [...state.probes.filter(p => p.at > since), ...asyncPasses(state, branch).filter(p => p.at > since).map(p => ({ at: p.at, pass: true }))].sort((a, b) => a.at - b.at);
+	const probes = heuristic.filter(p => p.pass).length;
+	const newestHeuristicFailed = heuristic.length > 0 && !heuristic[heuristic.length - 1].pass;
 	// Replies older than the newest run describe code that has since been probed again; exit codes speak for them.
-	const lastRun = Math.max(since, ...runs.map(v => v.at), ...state.probes.filter(t => t > since));
+	const lastRun = Math.max(since, ...runs.map(v => v.at), ...heuristic.map(p => p.at));
 	const report = state.replies.filter(r => r.at > lastRun).map(r => r.text).join("\n");
 	const fails = failLines(report);
 	const counts = { verified: runs.length - failed.length, failedRuns: failed.length, probes, fails: fails.length, passLines: (report.match(/\bPASS\b/g) ?? []).length };
-	if (runs.length === 0 && probes === 0) return refuse(noProbeReason(), "no probe since the request", counts);
+	if (runs.length === 0 && (probes === 0 || newestHeuristicFailed)) return refuse(noProbeReason(), newestHeuristicFailed ? "newest probe failed" : "no probe since the request", counts);
 	if (failed.length > 0 || fails.length > 0) {
 		const decision = refuse(failReason(failed, fails), failed.length ? "verify_item failed" : "FAIL reported", counts);
 		if (decision.block) state.requestedAt = tick(state, now);
