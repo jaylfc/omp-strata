@@ -121,7 +121,7 @@ export function viewedPaths(command: string, base: string): string[] {
 	const home = process.env.HOME || os.homedir();
 	// Split on unescaped &&, ||, ; and newlines. A cd inside a pipeline runs in a subshell and moves nothing,
 	// so a segment with a pipe is read as viewing commands from the current directory.
-	for (const segment of command.split(/\s*(?:(?<!\\)(?:&&|\|\||;)|\n)\s*/)) {
+	for (const segment of command.split(/\s*(?<!\\)(?:&&|\|\||;|\n)\s*/)) {
 		const cd = /(?<!\\)\|/.test(segment) ? null : /^cd(?:\s+(.*))?$/.exec(segment.trim());
 		if (cd) {
 			// Words: quoted, backslash-escaped spaces, or plain; flags (-L, -P, -e, -@) and "--" are skipped.
@@ -138,7 +138,11 @@ export function viewedPaths(command: string, base: string): string[] {
 			dir = next;
 			continue;
 		}
-		for (const word of viewedByBash(segment)) out.push(nodePath.resolve(dir, cleanPath(word)));
+		// In a pipeline, a cd stage changes nothing and its argument is not a viewed file: skip it.
+		for (const stage of segment.split(/(?<!\\)\|/)) {
+			if (/^\s*cd(?:\s|$)/.test(stage)) continue;
+			for (const word of viewedByBash(stage)) out.push(nodePath.resolve(dir, cleanPath(word)));
+		}
 	}
 	return out;
 }
