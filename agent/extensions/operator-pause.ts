@@ -20,11 +20,13 @@ import path from "node:path";
 export const PAUSE_FILE = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "omp-strata", "pause-requested");
 const MARKER = `<system-interrupt reason="operator_pause">`;
 
+/** True when the pause file exists. Any error other than "no such file" counts as a pause, so a file we cannot read never lets tools run. */
 export function pauseRequested(file = PAUSE_FILE): boolean {
 	try {
-		return fs.statSync(file).isFile();
-	} catch {
-		return false;
+		fs.statSync(file);
+		return true;
+	} catch (error) {
+		return (error as NodeJS.ErrnoException)?.code !== "ENOENT";
 	}
 }
 
