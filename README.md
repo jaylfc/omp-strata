@@ -4,7 +4,7 @@ Profile for [oh-my-pi](https://github.com/can1357/oh-my-pi) pointed at one local
 
 The focus is a single card on one machine. Our setup also includes a Mac mini M4 with 24 GB, and we are experimenting with offloading judge calls, subagent chat, and subagent image reviews to it. Coding, handoff, smol, and the main session's screenshot questions stay on the Strata card. An install with no second machine does that work on the card.
 
-Tested on omp 18.4.4 with `qwen3.8-flash-next-coder-iq1_m`, a 262144 context, and one request in flight. Upstream is ahead of that pin. See [UPSTREAM.md](UPSTREAM.md).
+Tested on omp 18.6.1 (and earlier 18.4.4) with `qwen3.8-flash-next-coder-iq1_m`, a 262144 context, and one request in flight. Upstream is ahead of that pin. See [UPSTREAM.md](UPSTREAM.md).
 
 Measured results behind these settings (thinking level, sampling, compaction, engine, loop guard) are in [FINDINGS.md](FINDINGS.md). The short version: medium thinking with a 3072-token budget, Qwen's thinking sampling instead of Strata's greedy default, and compaction at 98304 tokens with a 40000-token recent window.
 
@@ -129,7 +129,7 @@ The `mac-mini` skill tells the agent which call goes where. `RULES.md` stays the
 
 ## Install
 
-Install upstream `omp` first. This profile was tested on 18.4.4. Then:
+Install upstream `omp` first. This profile was tested on 18.6.1 (and earlier 18.4.4). Then:
 
 ```bash
 git clone https://github.com/jaylfc/omp-strata.git

@@ -1,5 +1,5 @@
 /**
- * Read-before-edit guard for omp 18.4.4.
+ * Read-before-edit guard for omp 18.4.4 and 18.6.1.
  *
  * omp already rejects hashline edits anchored on lines the model never saw
  * (edit.enforceSeenLines, on by default), so hashline edits pass through

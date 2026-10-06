@@ -1,5 +1,5 @@
 /**
- * Local Strata guard for omp 18.4.4.
+ * Local Strata guard for omp 18.4.4 and 18.6.1.
  *
  * Blocks the next identical call after the same arguments have been used 3
  * times, whether those calls failed or succeeded. A refusal is a tool
