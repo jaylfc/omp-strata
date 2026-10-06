@@ -1,5 +1,5 @@
 [Unit]
-Description=Apply jaylfc/omp-strata inside imagelxc
+Description=Apply jaylfc/omp-strata-12gb inside imagelxc
 
 [Service]
 Type=oneshot

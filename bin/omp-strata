@@ -1,7 +1,7 @@
 #!/bin/bash
 # omp-strata runs upstream omp with this profile.
 # `omp` itself stays the stock command and its own ~/.omp/agent.
-# `omp-strata update` pulls https://github.com/jaylfc/omp-strata.
+# `omp-strata update` pulls https://github.com/jaylfc/omp-strata-12gb.
 set -euo pipefail
 
 source="$(readlink -f "$0")"
