@@ -11,6 +11,17 @@ if [[ "${1:-}" == "update" ]]; then
   exec "$root/scripts/self-update.sh"
 fi
 
+# ~/.config/omp-strata/omp-path may name the omp binary to run (one line). It lets a machine move to a
+# newer omp, or roll back, without touching the host mount.
+override="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata/omp-path"
+if [[ -f "$override" && -r "$override" ]]; then
+  bin="$(head -n1 "$override")"
+  if [[ -x "$bin" ]]; then
+    exec "$bin" --profile=omp-strata "$@"
+  fi
+  echo "omp-strata: $override names $bin, which is not executable; using the default omp" >&2
+fi
+
 if [[ -x /opt/host-omp/omp ]]; then
   exec /opt/host-omp/omp --profile=omp-strata "$@"
 fi
