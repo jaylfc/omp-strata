@@ -24,6 +24,7 @@
  */
 import fs from "node:fs";
 import nodePath from "node:path";
+import os from "node:os";
 
 const MODE = (process.env.OMP_STRATA_READ_GUARD ?? "log").toLowerCase();
 /** Attempts of one refused call before it is let through. */
@@ -116,11 +117,23 @@ export function viewedByBash(command: string): string[] {
 export function viewedPaths(command: string, base: string): string[] {
 	const out: string[] = [];
 	let dir = base;
+	let previous = base;
+	const home = process.env.HOME || os.homedir();
 	for (const segment of command.split(/\s*(?:&&|\|\||;|\n)\s*/)) {
-		const cd = /^cd\s+("[^"]+"|'[^']+'|\S+)\s*$/.exec(segment.trim());
+		const cd = /^cd(?:\s+(.*))?$/.exec(segment.trim());
 		if (cd) {
-			const target = cd[1].replace(/^["']|["']$/g, "").replace(/^~(?=\/|$)/, process.env.HOME ?? "~");
-			dir = nodePath.resolve(dir, target);
+			// Words: quoted, backslash-escaped spaces, or plain; flags (-L, -P, -e, -@) and "--" are skipped.
+			const args = [...(cd[1] ?? "").matchAll(/"([^"]*)"|'([^']*)'|((?:\\.|[^\s"'\\])+)/g)]
+				.map(m => m[1] ?? m[2] ?? m[3].replace(/\\(.)/g, "$1"));
+			let i = 0;
+			while (i < args.length && /^-[LPe@]+$/.test(args[i])) i++;
+			if (args[i] === "--") i++;
+			const target = args[i];
+			const next = target === undefined ? home
+				: target === "-" ? previous
+				: nodePath.resolve(dir, target.replace(/^~(?=\/|$)/, home));
+			previous = dir;
+			dir = next;
 			continue;
 		}
 		for (const word of viewedByBash(segment)) out.push(nodePath.resolve(dir, cleanPath(word)));
