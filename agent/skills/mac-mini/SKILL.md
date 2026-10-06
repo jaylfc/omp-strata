@@ -13,7 +13,7 @@ The coder serves one request. The main session reads images through Strata. A su
 - Saved image in a subagent: the same `read <path>?q=<question>`. The extension returns the image on this subagent's model. That is the Mac while it answers. After the Mac call has continued on the coder, the image returns there.
 - Screenshot classification, yes/no, ranking: `judge()` in eval. This tries `modelRoles.judge` on the Mac. Batch questions in one call. If the Mac does not answer, omp continues that call on the coder.
 - Side work, research, or a long look that should not sit on the coder: the `task` tool. The extension pins every subagent to `SIDE_MODEL` in `agent/extensions/fail-loop-resteer.ts`. A failed Mac request continues on the coder.
-- Numbers from the game, one probe after an edit: `cinderline/tools/where.mjs`, `touchprobe.mjs`, or `menutest.mjs`. Do not run `describe.mjs`. It holds this turn and lets Bonsai think the budget away.
+- Numbers from the game, one probe after an edit: `cinderline/tools/where.mjs`, `touchprobe.mjs`, or `menutest.mjs`. Do not run `describe.mjs`. It holds this turn and lets the side model think the budget away.
 
 `completion()` stays blocked. It would call the coder.
 

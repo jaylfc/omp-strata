@@ -25,15 +25,15 @@ providers:
           cacheRead: 0
           cacheWrite: 0
   mac:
-    baseUrl: http://100.123.160.60:1234/v1
+    baseUrl: http://127.0.0.1:1234/v1
     api: openai-completions
     auth: none
     compat:
       extraBody:
         reasoning_effort: none
     models:
-      - id: google/gemma-4-12b-qat
-        name: Gemma 4 12B
+      - id: side-model
+        name: Side model
         reasoning: false
         input: [text, image]
         imageInputDecoder: stb

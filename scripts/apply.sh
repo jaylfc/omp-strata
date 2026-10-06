@@ -8,8 +8,54 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 agent="${HOME}/.omp/profiles/omp-strata/agent"
 mkdir -p "$agent/extensions" "$agent/skills/mac-mini"
 
-install -m 644 "$root/agent/extensions/fail-loop-resteer.ts" "$agent/extensions/fail-loop-resteer.ts"
-echo "installed $agent/extensions/fail-loop-resteer.ts"
+# Local choices from ~/.config/omp-strata/settings.env. scripts/strata-vision.sh
+# writes the vision keys. Updates keep them.
+STRATA_VISION=on
+VISION_MODEL=""
+SIDE_FALLBACK=on
+COMPACTION_MODEL=""
+SMOL_MODEL=""
+# The optional second OpenAI-compatible machine, provider `mac` in models.yml.
+# The repo ships placeholders; settings.env names the real server and model.
+SIDE_BASE_URL=http://127.0.0.1:1234/v1
+SIDE_MODEL_ID=side-model
+SIDE_MODEL_NAME="Side model"
+SIDE_CONTEXT=32768
+# SIDE_SUBAGENTS=off refuses subagents instead of pinning them to the side model.
+SIDE_SUBAGENTS=on
+settings="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata/settings.env"
+if [[ -f "$settings" ]]; then
+  # shellcheck disable=SC1090
+  source "$settings"
+fi
+if [[ -z "$SIDE_BASE_URL" || -z "$SIDE_MODEL_ID" || -z "$SIDE_MODEL_NAME" || ! "$SIDE_CONTEXT" =~ ^[0-9]+$ ]]; then
+  echo "settings.env: SIDE_BASE_URL, SIDE_MODEL_ID, and SIDE_MODEL_NAME must be set, and SIDE_CONTEXT must be a number" >&2
+  exit 1
+fi
+side_model="mac/$SIDE_MODEL_ID"
+# A role that names the side provider must name its one model, or omp would
+# route that role to a model models.yml does not have.
+for role in VISION_MODEL SMOL_MODEL COMPACTION_MODEL; do
+  if [[ "${!role}" == mac/* && "${!role}" != "$side_model" ]]; then
+    echo "settings.env: $role=${!role} but the side model is $side_model; set SIDE_MODEL_ID" >&2
+    exit 1
+  fi
+done
+subagent_model="$side_model"
+[[ "$SIDE_SUBAGENTS" == off ]] && subagent_model=""
+
+# The repo copy pins subagents to the placeholder; install it with the real selector.
+python3 - "$root/agent/extensions/fail-loop-resteer.ts" "$agent/extensions/fail-loop-resteer.ts" "$subagent_model" <<'PY'
+import json, pathlib, sys
+src, dst, model = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2]), sys.argv[3]
+text = src.read_text()
+old = 'const SIDE_MODEL = "mac/side-model";'
+if text.count(old) != 1:
+    raise SystemExit(f"{src}: SIDE_MODEL line not found; update apply.sh")
+dst.write_text(text.replace(old, f"const SIDE_MODEL = {json.dumps(model)};"))
+dst.chmod(0o644)
+print(f"installed {dst} (SIDE_MODEL {json.dumps(model)})")
+PY
 
 install -m 644 "$root/agent/extensions/read-before-edit.ts" "$agent/extensions/read-before-edit.ts"
 echo "installed $agent/extensions/read-before-edit.ts"
@@ -23,8 +69,41 @@ echo "installed $agent/skills/mac-mini/SKILL.md"
 install -m 644 "$root/agent/RULES.md" "$agent/RULES.md"
 echo "installed $agent/RULES.md"
 
-install -m 644 "$root/agent/models.yml" "$agent/models.yml"
-echo "installed $agent/models.yml"
+# The side provider's URL, model id, name, and context come from settings.env.
+python3 - "$root/agent/models.yml" "$agent/models.yml" "$SIDE_BASE_URL" "$SIDE_MODEL_ID" "$SIDE_MODEL_NAME" "$SIDE_CONTEXT" <<'PY'
+import json, pathlib, sys
+import yaml
+src, dst = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+url, model_id, name, context = sys.argv[3:]
+
+
+def scalar(value):
+    # Plain when YAML reads it back as the same string, JSON-quoted otherwise.
+    try:
+        if yaml.safe_load(value) == value:
+            return value
+    except yaml.YAMLError:
+        pass
+    return json.dumps(value)
+
+
+text = src.read_text()
+swaps = [
+    ("  mac:\n    baseUrl: http://127.0.0.1:1234/v1\n", f"  mac:\n    baseUrl: {scalar(url)}\n"),
+    ("      - id: side-model\n        name: Side model\n", f"      - id: {scalar(model_id)}\n        name: {scalar(name)}\n"),
+    ("        contextWindow: 32768\n", f"        contextWindow: {int(context)}\n"),
+]
+for old, new in swaps:
+    if text.count(old) != 1:
+        raise SystemExit(f"{src}: side provider line {old.strip()!r} not found; update apply.sh")
+    text = text.replace(old, new)
+side = yaml.safe_load(text)["providers"]["mac"]
+if side["baseUrl"] != url or side["models"][0]["id"] != model_id:
+    raise SystemExit(f"{src}: side provider did not round-trip; update apply.sh")
+dst.write_text(text)
+dst.chmod(0o644)
+print(f"installed {dst} (side model {model_id} at {url})")
+PY
 
 # imagelxc reaches host Strata through the proxy on 18080. Other machines use 8080.
 if [[ -x /opt/host-omp/omp ]]; then
@@ -40,17 +119,6 @@ if old in text:
 PY
 fi
 
-# Local choices from scripts/strata-vision.sh. Updates keep them.
-STRATA_VISION=on
-VISION_MODEL=""
-SIDE_FALLBACK=on
-COMPACTION_MODEL=""
-SMOL_MODEL=""
-settings="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata/settings.env"
-if [[ -f "$settings" ]]; then
-  # shellcheck disable=SC1090
-  source "$settings"
-fi
 config_yml="$root/agent/strata.config.yml"
 overrides=()
 if [[ "$STRATA_VISION" == off ]]; then
@@ -78,6 +146,9 @@ fi
 # ~400 prompt tokens) go to modelRoles.smol. On the coder each one evicts the
 # coder's conversation; with --kv-persist that is a 1-2 GB save and a restore.
 [[ -n "$SMOL_MODEL" ]] && overrides+=("smol=$SMOL_MODEL")
+# strata.config.yml names the placeholder mac/side-model (judge, task, and its
+# fallback chain); point those at SIDE_MODEL_ID.
+[[ "$side_model" != mac/side-model ]] && overrides+=("side=$side_model")
 # COMPACTION_MODEL: omp 18.4.4 runs handoff on the session model and blocks the
 # coder for minutes. soft uses compactionModel and can run in the background,
 # so soft goes first and the summary is written by that model.
@@ -102,6 +173,21 @@ if (( ${#overrides[@]} )); then
 import sys, yaml
 src, dst, *overrides = sys.argv[1:]
 cfg = yaml.safe_load(open(src))
+
+
+def rename(node, old, new):
+    if isinstance(node, dict):
+        return {rename(k, old, new): rename(v, old, new) for k, v in node.items()}
+    if isinstance(node, list):
+        return [rename(v, old, new) for v in node]
+    return new if node == old else node
+
+
+# The side rename runs first, so SMOL_MODEL or VISION_MODEL may name the side model too.
+for item in overrides:
+    if item.startswith("side="):
+        cfg = rename(cfg, "mac/side-model", item.split("=", 1)[1])
+        print(f"judge, task, and fallback chain on {item.split('=', 1)[1]} (SIDE_MODEL_ID set)")
 for item in overrides:
     if item.startswith("vision="):
         cfg.setdefault("modelRoles", {})["vision"] = item.split("=", 1)[1]

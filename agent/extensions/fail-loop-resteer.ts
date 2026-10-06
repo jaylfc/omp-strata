@@ -13,7 +13,9 @@
  * SIDE_MODEL pins every subagent (the task tool and eval agent()) to a
  * second model so the spawn does not take the coder's only request slot.
  * Set it to "" to refuse subagents instead. The provider id and model id
- * must exist in models.yml.
+ * must exist in models.yml. The repo copy names the placeholder
+ * "mac/side-model"; apply.sh installs this file with mac/<SIDE_MODEL_ID>
+ * from settings.env, or "" when SIDE_SUBAGENTS=off.
  *
  * wait, job, irc, yield, todo, and goal are allowed to repeat.
  *
@@ -26,7 +28,7 @@
  */
 const BLOCK_AFTER = 3;
 /** Empty string refuses subagents. A selector pins them to that model. */
-const SIDE_MODEL = "mac/google/gemma-4-12b-qat";
+const SIDE_MODEL = "mac/side-model";
 const EXEMPT = new Set(["wait", "job", "irc", "yield", "todo", "goal"]);
 /**
  * Read-only tools may repeat while they succeed: after compaction or output
