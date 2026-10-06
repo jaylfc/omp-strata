@@ -14,6 +14,9 @@ echo "installed $agent/extensions/fail-loop-resteer.ts"
 install -m 644 "$root/agent/extensions/read-before-edit.ts" "$agent/extensions/read-before-edit.ts"
 echo "installed $agent/extensions/read-before-edit.ts"
 
+install -m 644 "$root/agent/extensions/operator-pause.ts" "$agent/extensions/operator-pause.ts"
+echo "installed $agent/extensions/operator-pause.ts"
+
 install -m 644 "$root/agent/skills/mac-mini/SKILL.md" "$agent/skills/mac-mini/SKILL.md"
 echo "installed $agent/skills/mac-mini/SKILL.md"
 
