@@ -14,7 +14,7 @@ fi
 # ~/.config/omp-strata/omp-path may name the omp binary to run (one line). It lets a machine move to a
 # newer omp, or roll back, without touching the host mount.
 override="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata/omp-path"
-if [[ -r "$override" ]]; then
+if [[ -f "$override" && -r "$override" ]]; then
   bin="$(head -n1 "$override")"
   if [[ -x "$bin" ]]; then
     exec "$bin" --profile=omp-strata "$@"
