@@ -29,7 +29,13 @@
 const BLOCK_AFTER = 3;
 /** Empty string refuses subagents. A selector pins them to that model. */
 const SIDE_MODEL = "mac/side-model";
-const EXEMPT = new Set(["wait", "job", "irc", "yield", "todo", "goal"]);
+const EXEMPT = new Set(["wait", "job", "irc", "yield", "todo", "goal", "verify_item", "lesson_propose"]);
+/** omp 18.6.1 calls extension tools by writing JSON to xd://<tool>. Re-running an item's probe after a fix is not a loop. */
+function exempt(name: string, args: unknown): boolean {
+	if (EXEMPT.has(name)) return true;
+	const path = args && typeof args === "object" ? (args as { path?: unknown }).path : undefined;
+	return name === "write" && typeof path === "string" && /^xd:\/\/(?:verify_item|lesson_propose)\b/.test(path);
+}
 /**
  * Read-only tools may repeat while they succeed: after compaction or output
  * trimming the model needs the same file again. Repeated failures still block.
@@ -191,10 +197,10 @@ export function seedFromBranch(branch: readonly SessionEntry[]): Run | undefined
 		if (!message || message.role !== "toolResult") continue;
 		const call = message.toolCallId ? calls.get(message.toolCallId) : undefined;
 		const name = call?.name ?? message.toolName ?? "";
-		if (!name || EXEMPT.has(name)) continue;
+		const args = call?.args ?? {};
+		if (!name || exempt(name, args)) continue;
 		const text = textOf(message.content);
 		if (isOwnBlock(text)) continue;
-		const args = call?.args ?? {};
 		const next = signature(name, args);
 		if (runSignature === undefined) runSignature = next;
 		else if (next !== runSignature) break;
@@ -617,7 +623,7 @@ export default function (pi: {
 				probeCount = 1;
 			}
 		}
-		if (EXEMPT.has(event.toolName)) return;
+		if (exempt(event.toolName, event.input)) return;
 		const text = resultText(event.content);
 		if (isOwnBlock(text)) return;
 		const recomputed = signature(event.toolName, event.input);
@@ -675,7 +681,7 @@ export default function (pi: {
 			if (withHint) pi.logger?.warn?.("added image-read hint to subagent tasks", { toolName: event.toolName });
 			if (withHint || unpinned) return { input: withHint ?? unpinned };
 		}
-		if (EXEMPT.has(event.toolName)) return;
+		if (exempt(event.toolName, event.input)) return;
 		if (event.toolName === "eval") {
 			const preflight = evalPreflight(event.input);
 			if (preflight) {
