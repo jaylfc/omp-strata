@@ -81,14 +81,14 @@ Vision on the coder is the default, because a one-machine install has no other m
 # Images on the coder (default)
 bash scripts/strata-vision.sh on --restart
 # Images on another model from models.yml; the coder is text-only
-bash scripts/strata-vision.sh off --model mac/google/gemma-4-12b-qat --restart
+bash scripts/strata-vision.sh off --model mac/side-model --restart
 ```
 
 The choice is saved in `~/.config/omp-strata/settings.env` (`STRATA_VISION`, `VISION_MODEL`), so `apply.sh`, `install.sh`, and updates keep it. With `off`, `apply.sh` sets the coder's `input` to `[text]` and `modelRoles.vision` to `VISION_MODEL`. omp then describes tool screenshots with that model, and `read <path>?q=` goes there. The Strata half edits `strata-coder-iq1_m.json` (it keeps the previous file as `.json.vision-on`), and `--restart` restarts the running server through `scripts/restart-strata.sh`. When Strata and omp run on different machines, run the script on each with `--server-only` or `--profile-only`.
 
 `SIDE_FALLBACK=off` in the same file stops judge and subagent calls from continuing on the coder when the side model fails. Each such fallback is a cold read of an 8–12K-token subagent prompt on the coder, and it evicts the main session's cached prompt, so the next main turn re-reads 55–61K tokens (about a minute on a 3060). With the coder's vision off, a fallback review also cannot see the screenshot. Leave it on for a one-machine install.
 
-`COMPACTION_MODEL=<provider/model>` in the same file moves compaction to that model: `apply.sh` sets the coder entry's `compactionModel` and puts `soft` first. Measured on 2026-10-04 with Gemma 4 12B on a base M4 as that model, a mid-turn `soft` compaction of a 74K-token session blocked the coder for 14 minutes (a cold read of about 54K tokens on the Mac plus a 14K-character summary at about 14 tok/s). The coder's own `handoff` took about 6 minutes on the same session size. In omp 18.4.4 a mid-turn compaction does not run in the background, so leave this unset unless the side model reads and writes faster than the coder. If you do set it, the model's loaded context must hold the span older than `keepRecentTokens` (about 45K at a 65536 threshold) plus its summary.
+`COMPACTION_MODEL=<provider/model>` in the same file moves compaction to that model: `apply.sh` sets the coder entry's `compactionModel` and puts `soft` first. Measured on 2026-10-04 with a 12B side model on a base M4, a mid-turn `soft` compaction of a 74K-token session blocked the coder for 14 minutes (a cold read of about 54K tokens on the Mac plus a 14K-character summary at about 14 tok/s). The coder's own `handoff` took about 6 minutes on the same session size. In omp 18.4.4 a mid-turn compaction does not run in the background, so leave this unset unless the side model reads and writes faster than the coder. If you do set it, the model's loaded context must hold the span older than `keepRecentTokens` (about 45K at a 65536 threshold) plus its summary.
 
 ## The Mac mini experiment
 
@@ -96,7 +96,17 @@ Our development setup includes a Mac mini M4 with 24 GB alongside the 12 GB Stra
 
 `modelRoles.smol` is the coder. omp uses that role to compress a skill description into one routing hint of at most 12 words and 160 characters, and small background calls use it when no separate tiny model is set. The call does not walk `retry.fallbackChains` and stops after 30s. On 2026-10-04 a 108-token mac-mini prompt took 1.6–2.2s warm on the coder and 3.6–3.7s on the Mac. Both answers were 14 or 15 words, so omp kept the plain preview. The role stays on the coder, which is the machine a single-card install has. After the skill text changed, one cold coder call (108 prompt tokens, 19 generated, about 3.7s) returned `Use Mac mini for judge() and subagents; main-session screenshots use read ?q=`. That line is 12 words and 77 characters, so omp cached it. The same description does not call the coder again. A compression still uses the coder's only slot. Titles stay off (`--no-title`, and `title.refreshOnReplan: false`). `SMOL_MODEL=<provider/model>` in `~/.config/omp-strata/settings.env` moves that role to another model when one is available. Each smol call on the coder evicts its conversation; with `--kv-persist` that means a 1–2 GB save and a restore, measured at 31 saves (48 GB) in four hours of goal work.
 
-`agent/models.yml` has the side provider for that experiment. On our tailnet it is LM Studio on the Mac mini, `http://100.123.160.60:1234/v1`, model `google/gemma-4-12b-qat`. A single-card install can leave the provider unused. Judge and subagent calls continue on the coder when the Mac does not answer.
+`agent/models.yml` has the side provider for that experiment: provider `mac`, an optional second OpenAI-compatible machine (we use LM Studio on a Mac mini). The repo ships placeholders, `http://127.0.0.1:1234/v1` and model id `side-model`. `apply.sh` fills the installed copy from these keys in `~/.config/omp-strata/settings.env`:
+
+| Key | Default | What it sets |
+| --- | --- | --- |
+| `SIDE_BASE_URL` | `http://127.0.0.1:1234/v1` | The side provider's `baseUrl`. |
+| `SIDE_MODEL_ID` | `side-model` | The model id. `modelRoles.judge`, `modelRoles.task`, the fallback chain, and the extension's `SIDE_MODEL` become `mac/<id>`. |
+| `SIDE_MODEL_NAME` | `Side model` | The display name. Quote it when it has spaces. |
+| `SIDE_CONTEXT` | `32768` | `contextWindow`. Match the context the server actually loaded. |
+| `SIDE_SUBAGENTS` | `on` | `off` installs the extension with `SIDE_MODEL = ""`, which refuses subagents. |
+
+`apply.sh` stops before installing anything when `VISION_MODEL`, `SMOL_MODEL`, or `COMPACTION_MODEL` names a `mac/` model other than `mac/<SIDE_MODEL_ID>`. A single-card install can leave the provider unused. Judge and subagent calls continue on the coder when the side machine does not answer.
 
 | Role | Where it runs |
 | --- | --- |
@@ -106,18 +116,18 @@ Our development setup includes a Mac mini M4 with 24 GB alongside the 12 GB Stra
 | `modelRoles.smol` | The Strata coder. Skill compression and other small calls. |
 | Coder `compactionModel` | unset. Handoff uses the session model. |
 
-`SIDE_MODEL` in `agent/extensions/fail-loop-resteer.ts` is `mac/google/gemma-4-12b-qat`. Every subagent, including eval `agent()`, is pinned to the Mac. Set it to `""` to refuse subagents when that provider is gone. `apply.sh` overwrites the extension, so the constant in this repo is the one that will be installed.
+`SIDE_MODEL` in `agent/extensions/fail-loop-resteer.ts` is the placeholder `mac/side-model`. `apply.sh` installs the extension with `mac/<SIDE_MODEL_ID>` in its place, so every subagent, including eval `agent()`, is pinned to the side model. `SIDE_SUBAGENTS=off` installs it as `""`, which refuses subagents when that provider is gone. Edit `settings.env` rather than the installed file: `apply.sh` overwrites it.
 
 `retry.fallbackChains` lists the coder under that Mac model and under `judge` and `task`. Smol is already the coder, so it has no chain. The Mac is still the first try for judge and subagents. When the request fails, omp continues it on the coder. That uses the coder's only slot, so the next coder turn reads the prompt cold. `retry.fallbackRevertPolicy` stays `cooldown-expiry`, so a later call tries the Mac again after the suppression window.
 
-On 2026-10-04 the side model changed from `prism-ml/bonsai-27b` (MLX, 2-bit, dense 27B) to `google/gemma-4-12b-qat` (Gemma 4 12B, Q4_0 GGUF, vision, loaded at 32768 context with 2 parallel slots; compaction stays on the coder, so the Mac keeps memory free for on-demand image generation). On a base M4, the dense 27B read a 6.5K-token prompt at about 31 tok/s and decoded at about 2 tok/s while other requests were queued, so each screenshot review took many minutes. LM Studio's just-in-time model loading is off, so a request can never load the model again with default settings. Gemma 4 26B-A4B (a mixture-of-experts model with about 4B active parameters) is the next candidate to measure.
+On 2026-10-04 our side model changed from a dense 27B (MLX, 2-bit) to a 12B vision model (Q4_0 GGUF, loaded at 32768 context with 2 parallel slots; compaction stays on the coder, so the Mac keeps memory free for on-demand image generation). On a base M4, the dense 27B read a 6.5K-token prompt at about 31 tok/s and decoded at about 2 tok/s while other requests were queued, so each screenshot review took many minutes. LM Studio's just-in-time model loading is off, so a request can never load the model again with default settings.
 
-Two LM Studio facts decide that entry (first measured with Bonsai, and they hold for any model served there):
+Two LM Studio facts decide that entry (first measured with the dense 27B, and they hold for any model served there):
 
 - omp sends images as WebP data URLs. LM Studio answers `400 'url' field must be a base64 encoded image` for those. The Mac model sets `imageInputDecoder: stb`, and so does the coder. A direct HTTP call must send `data:image/png;base64,...`.
 - The model thinks unless the request sets `reasoning_effort` to `none`. Thinking can spend the whole `max_tokens` budget and return empty content. Set `compat.extraBody.reasoning_effort: none`.
 
-`providers.maxInFlightRequests` for the Mac is `1`, so a judge call and a subagent queue there instead of loading the 27B model twice. The coder's slot stays separate, so one Mac call can overlap one coder turn. A main-session vision call is a coder turn. A subagent image review runs on the subagent's model, so it overlaps the coder while the Mac is answering.
+`providers.maxInFlightRequests` for the Mac is `1`, so a judge call and a subagent queue there instead of loading the model twice. The coder's slot stays separate, so one Mac call can overlap one coder turn. A main-session vision call is a coder turn. A subagent image review runs on the subagent's model, so it overlaps the coder while the Mac is answering.
 
 The `mac-mini` skill tells the agent which call goes where. `RULES.md` stays the short always-on reminder. `apply.sh` replaces `RULES.md` from this repo on every install.
 
@@ -158,7 +168,7 @@ Install RTK 0.51.0 and let it write its extension.
 rtk init --agent omp --global --auto-patch
 ```
 
-`agent/models.yml` already names the side provider. Match its `contextWindow` to the loaded context before starting.
+With a side machine, set `SIDE_BASE_URL`, `SIDE_MODEL_ID`, and `SIDE_CONTEXT` (the loaded context) in `~/.config/omp-strata/settings.env`, then run `bash scripts/apply.sh` again before starting.
 
 Start in the project directory:
 
@@ -180,7 +190,7 @@ bash scripts/check-upstream.sh --write
 ## Layout
 
 ```
-agent/models.yml                         strata provider
+agent/models.yml                         strata provider, side provider placeholders
 agent/strata.config.yml                  keys to merge
 agent/RULES.md                           always-on rules
 agent/skills/mac-mini/SKILL.md           when to use the side model
