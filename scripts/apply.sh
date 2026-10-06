@@ -63,6 +63,9 @@ echo "installed $agent/extensions/read-before-edit.ts"
 install -m 644 "$root/agent/extensions/operator-pause.ts" "$agent/extensions/operator-pause.ts"
 echo "installed $agent/extensions/operator-pause.ts"
 
+install -m 644 "$root/agent/extensions/handoff-speed.ts" "$agent/extensions/handoff-speed.ts"
+echo "installed $agent/extensions/handoff-speed.ts"
+
 install -m 644 "$root/agent/skills/mac-mini/SKILL.md" "$agent/skills/mac-mini/SKILL.md"
 echo "installed $agent/skills/mac-mini/SKILL.md"
 
