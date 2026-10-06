@@ -119,8 +119,10 @@ export function viewedPaths(command: string, base: string): string[] {
 	let dir = base;
 	let previous = base;
 	const home = process.env.HOME || os.homedir();
-	for (const segment of command.split(/\s*(?:&&|\|\||;|\n)\s*/)) {
-		const cd = /^cd(?:\s+(.*))?$/.exec(segment.trim());
+	// Split on unescaped &&, ||, ; and newlines. A cd inside a pipeline runs in a subshell and moves nothing,
+	// so a segment with a pipe is read as viewing commands from the current directory.
+	for (const segment of command.split(/\s*(?:(?<!\\)(?:&&|\|\||;)|\n)\s*/)) {
+		const cd = /(?<!\\)\|/.test(segment) ? null : /^cd(?:\s+(.*))?$/.exec(segment.trim());
 		if (cd) {
 			// Words: quoted, backslash-escaped spaces, or plain; flags (-L, -P, -e, -@) and "--" are skipped.
 			const args = [...(cd[1] ?? "").matchAll(/"([^"]*)"|'([^']*)'|((?:\\.|[^\s"'\\])+)/g)]
