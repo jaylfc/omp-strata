@@ -66,6 +66,23 @@ To test sampling without restarting omp, Strata's `POST /settings` with `{"defau
 
 **Cost:** a cold read after a restart or cache eviction takes about 100 s at this size. A cached turn reads only the new tokens, 1–3 s.
 
+## Handoff (2026-10-06)
+
+| Handoff (UTC) | Prompt | Reused | Cold read | Generated | Decode | Document |
+| --- | --- | --- | --- | --- | --- | --- |
+| 10-05 15:15 (no shake before it) | 99,925 | 98,582 | 3.5 s | 5,512 | 401 s | 13,727 chars |
+| 10-05 16:35 | 92,190 | 8,845 | 82 s | 4,074 | 296 s | 16,089 |
+| 10-05 18:46 | 88,217 | 8,845 | 80 s | 3,980 | 282 s | 15,662 |
+| 10-06 02:33 | 79,475 | 8,845 | 73 s | 4,763 | 360 s | 18,423 |
+| 10-06 03:49 | 89,732 | 9,060 | 80 s | 5,396 | 383 s | 20,687 |
+| 10-06 05:26 | 88,280 | 55,140 | 36 s | 4,925 | 314 s | 18,124 |
+| 10-06 06:29 (no document; soft followed) | 92,232 | 9,060 | 81 s | 3,072 | 247 s | none |
+| 10-06 07:53 | 81,193 | 9,060 | 72 s | 4,704 | 339 s | 16,784 |
+| 10-06 09:02 | 81,173 | 9,060 | 72 s | 6,599 | 475 s | 21,501 |
+| 10-06 13:28 | 93,190 | 45,999 | 50 s | 4,682 | 383 s | 16,812 |
+
+Each row is matched by the coder turns just before and after it in the session (their `input + cacheRead` equals the engine's prompt count). Every cold handoff followed a shake that elided tool results and still left the context above 80% of the threshold. Shake rewrote the session before the handoff was built, so the prefix ended at the first elided result. At 13:28 the model thought for about 70 tokens; the document is the decode cost, about 3.65 characters per token. The 10:34 handoff wrote 102 tokens and is left out. `handoff-speed.ts` is the response; see README, Handoff speed.
+
 ## Engine (2026-10-04)
 
 **Benchmark:** the same ~56K-token prompt per engine: a cold read, then an exact continuation. Same pack and arguments, RTX 3060.
