@@ -1,4 +1,4 @@
-# omp-strata
+# omp-strata-12gb
 
 Profile for [oh-my-pi](https://github.com/can1357/oh-my-pi) pointed at one local [Strata](https://github.com/Niko1221/Strata) server. Install the upstream `omp` binary, then apply this profile on top. The running agent keeps using that upstream binary. This repo is the guide for that one-machine setup, not a second client fork. omp itself runs unmodified; every change lives in this profile.
 
@@ -132,7 +132,7 @@ The `mac-mini` skill tells the agent which call goes where. `RULES.md` stays the
 Install upstream `omp` first. This profile was tested on 18.6.1 (and earlier 18.4.4). Then:
 
 ```bash
-git clone https://github.com/jaylfc/omp-strata.git
+git clone https://github.com/jaylfc/omp-strata-12gb.git
 cd omp-strata
 bash scripts/install.sh
 ```

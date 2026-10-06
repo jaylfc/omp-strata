@@ -1,5 +1,5 @@
 [Unit]
-Description=Hourly pull of jaylfc/omp-strata
+Description=Hourly pull of jaylfc/omp-strata-12gb
 
 [Timer]
 OnCalendar=hourly
