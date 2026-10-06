@@ -132,7 +132,7 @@ The `mac-mini` skill tells the agent which call goes where. `RULES.md` stays the
 Install upstream `omp` first. This profile was tested on 18.6.1 (and earlier 18.4.4). Then:
 
 ```bash
-git clone https://github.com/jaylfc/omp-strata-12gb.git
+git clone https://github.com/jaylfc/omp-strata-12gb.git omp-strata
 cd omp-strata
 bash scripts/install.sh
 ```
