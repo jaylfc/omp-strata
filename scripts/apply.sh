@@ -66,6 +66,15 @@ echo "installed $agent/extensions/operator-pause.ts"
 install -m 644 "$root/agent/extensions/handoff-speed.ts" "$agent/extensions/handoff-speed.ts"
 echo "installed $agent/extensions/handoff-speed.ts"
 
+# Claims and evidence: done-gate (with verify_item), goal-verify, lessons.
+for ext in done-gate.ts goal-verify.ts lessons.ts; do
+  install -m 644 "$root/agent/extensions/$ext" "$agent/extensions/$ext"
+  echo "installed $agent/extensions/$ext"
+done
+# The curated lessons. lessons-proposed.jsonl beside it holds the agent's suggestions and is never touched here.
+install -m 644 "$root/agent/lessons.jsonl" "$agent/lessons.jsonl"
+echo "installed $agent/lessons.jsonl"
+
 install -m 644 "$root/agent/skills/mac-mini/SKILL.md" "$agent/skills/mac-mini/SKILL.md"
 echo "installed $agent/skills/mac-mini/SKILL.md"
 

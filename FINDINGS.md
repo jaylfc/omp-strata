@@ -142,3 +142,27 @@ omp 18.4.4 already refuses hashline edits on lines no read or search displayed (
 
 The guard therefore ships log-only, and the regular audits count its `would refuse` lines. It is switched on only if those show real cases and a bench A/B confirms it helps.
 
+
+## Claims of done (2026-10-06)
+
+The coder marked nine goal items done and completed goal `159b375baa3760c4`. An independent check of each item on a private copy found **3 PASS, 4 PARTIAL, 2 FAIL**, plus three new P0 crashes (lab `experiments/001-cinderline-polish/verify-2026-10-06.md`). Its evidence was weak:
+- `node --check` after the last edit;
+- `winsim.mjs`, a simulator that picks the best move every turn (88.5% wins; with the default move, real first fights were lost 12 of 16);
+- screenshots of the field and title screens for a fix that was in battle;
+- dialogue tested once on a fresh log.
+
+Five items were marked done by calls that named other items. omp's `todo done` ignores `items` and `list`. With no `task` or `phase` it marks every open task done: at 07:26, `{"op":"done","items":[4 names]}` completed all 9 tasks.
+
+Replaying that session's claims through `done-gate.ts` with the heuristic rule (`OMP_STRATA_DONE_EVIDENCE=probe`):
+
+| Time (UTC) | Claim | Decision |
+| --- | --- | --- |
+| 07:26 | `done` naming 4 items (completed 9) | refused: items/list ignored |
+| 08:34 | `done` naming 1 item (completed 5) | rewritten to `task`; webcheck had run after the last edit |
+| 13:15:01 | `done` with `list` (2 of 3 items) | refused: items/list ignored |
+| 13:15:53 | `done` with a whole phase of 4 re-created items | rewritten to `phase`, refused: no probe since they opened |
+| 14:39 | `goal complete` | **allowed**: `winsim.mjs` ran after the last edit |
+
+The heuristic stops the bulk claims, but it lets the 14:39 completion through on the simulator. A pattern match on command text cannot tell a real probe from a flattering one. So the default rule is `verify`. `verify_item` runs the item's probe in the extension and records its exit code. `done` needs that item's latest run to have passed after the last edit. The first `goal complete` gets a per-criterion checklist (`goal-verify.ts`), and the goal completes only when the latest run of every criterion exited 0. Self-verification by the agent catches about 61% of wrong solutions and repairs about half of those (arXiv 2609.38812); a dedicated verification tool changes behaviour where a prompt to verify does not (arXiv 2610.01618).
+
+Deferred: a verifier in a fresh context. omp 18.6.1 gives an extension no context that is fresh and runs tools: `runEphemeralTurn` is one reply on the session's own model, with no tool execution. `task` subagents here are pinned to the side model, with the coder as fallback. The probes already run outside the coder; the round that lists and judges the criteria does not.
