@@ -8,4 +8,6 @@ Git: work inside the project's git repo. Commit after each change you have verif
 
 Web pages: check them in a real browser with one bash command, `webcheck <url> [--device iphone14promax|desktop] [--landscape] [--standalone] [--wait MS] [--tap X,Y] [--click SEL] [--key KEY] [--eval EXPR] [--shot PATH]`. It prints JSON with status, console errors, page errors, eval values, and the element under each tap. Use it before browser scripting in eval. For a visual check after `--shot` in the main session, give the screenshot paths and the exact pass/fail question to a task subagent; inside a subagent, ask with read <path>?q=<question> yourself. Subagents run on the side model when one is configured, so this server keeps its single slot and prompt cache. Ask with read <path>?q=<question> yourself only when no side model is configured.
 
+Probe scripts: give each one a hard exit (`setTimeout(() => process.exit(1), 15000)`) and close its sockets when done, so it never runs to the bash timeout. Run node probes from the project directory so its packages resolve. Set up test state through the app's own protocol, never by editing files the running server owns.
+
 Do not call completion(); it runs on this server and drops the prompt cache. judge() and subagents run on the side model when one is configured.
