@@ -377,6 +377,26 @@ const IMAGE_HINT_MARK = "read <path>?q=<question>";
  * A subagent given screenshot paths does not know it can see them: on 2026-10-05 the side model
  * answered "I cannot see or review images" and no visual check happened. Tell each task how.
  */
+/** A copy of a task call without model choices (top level and per task), or undefined when it has none. */
+export function stripTaskModel(input: unknown): Record<string, unknown> | undefined {
+	if (!input || typeof input !== "object") return undefined;
+	const record = input as Record<string, unknown> & { tasks?: unknown };
+	let changed = "model" in record;
+	const { model: _drop, ...rest } = record;
+	const out: Record<string, unknown> = rest;
+	if (Array.isArray(record.tasks)) {
+		out.tasks = record.tasks.map(item => {
+			if (item && typeof item === "object" && "model" in (item as Record<string, unknown>)) {
+				changed = true;
+				const { model: _m, ...task } = item as Record<string, unknown>;
+				return task;
+			}
+			return item;
+		});
+	}
+	return changed ? out : undefined;
+}
+
 export function addImageReadHint(input: unknown): Record<string, unknown> | undefined {
 	const record = input as { tasks?: Array<{ task?: unknown }> } | undefined;
 	if (!record || !Array.isArray(record.tasks)) return undefined;
@@ -645,11 +665,13 @@ export default function (pi: {
 			return refuse(ctx, signature(event.toolName, event.input), taskReason());
 		}
 		if (event.toolName === "task") {
-			const withHint = addImageReadHint(event.input);
-			if (withHint) {
-				pi.logger?.warn?.("added image-read hint to subagent tasks", { toolName: event.toolName });
-				return { input: withHint };
-			}
+			// omp 18.5+ lets the model pick a subagent's model in the call (omp #14564); the spawn hook's pin decides instead.
+			const unpinned = stripTaskModel(event.input);
+			if (unpinned) pi.logger?.warn?.("removed a model choice from a subagent task", { toolName: event.toolName });
+			const base = unpinned ?? event.input;
+			const withHint = addImageReadHint(base);
+			if (withHint) pi.logger?.warn?.("added image-read hint to subagent tasks", { toolName: event.toolName });
+			if (withHint || unpinned) return { input: withHint ?? unpinned };
 		}
 		if (EXEMPT.has(event.toolName)) return;
 		if (event.toolName === "eval") {

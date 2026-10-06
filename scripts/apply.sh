@@ -42,6 +42,7 @@ STRATA_VISION=on
 VISION_MODEL=""
 SIDE_FALLBACK=on
 COMPACTION_MODEL=""
+SMOL_MODEL=""
 settings="${XDG_CONFIG_HOME:-$HOME/.config}/omp-strata/settings.env"
 if [[ -f "$settings" ]]; then
   # shellcheck disable=SC1090
@@ -70,6 +71,10 @@ fi
 # SIDE_FALLBACK=off: a failed side-model call errors instead of continuing on
 # the coder. Each fallback is a cold read on the coder and evicts its prompt cache.
 [[ "$SIDE_FALLBACK" == off ]] && overrides+=("nofallback")
+# SMOL_MODEL: omp's small background calls (skill routing hints and similar,
+# ~400 prompt tokens) go to modelRoles.smol. On the coder each one evicts the
+# coder's conversation; with --kv-persist that is a 1-2 GB save and a restore.
+[[ -n "$SMOL_MODEL" ]] && overrides+=("smol=$SMOL_MODEL")
 # COMPACTION_MODEL: omp 18.4.4 runs handoff on the session model and blocks the
 # coder for minutes. soft uses compactionModel and can run in the background,
 # so soft goes first and the summary is written by that model.
@@ -98,6 +103,9 @@ for item in overrides:
     if item.startswith("vision="):
         cfg.setdefault("modelRoles", {})["vision"] = item.split("=", 1)[1]
         print(f"modelRoles.vision {item.split('=', 1)[1]} (STRATA_VISION=off)")
+    elif item.startswith("smol="):
+        cfg.setdefault("modelRoles", {})["smol"] = item.split("=", 1)[1]
+        print(f"modelRoles.smol {item.split('=', 1)[1]} (SMOL_MODEL set)")
     elif item == "softfirst":
         cfg.setdefault("compaction", {})["methodOrder"] = ["soft", "shake", "handoff"]
         print("compaction.methodOrder soft, shake, handoff (COMPACTION_MODEL set)")
