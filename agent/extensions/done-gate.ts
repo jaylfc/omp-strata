@@ -38,6 +38,12 @@
  * scope bug above. One named item is rewritten to `task`; a whole phase to
  * `phase`; anything else is refused with the one-task-per-call form.
  *
+ * The watcher (watcher.ts) can arm the gate: after two consecutive
+ * "overclaiming" verdicts at or above its threshold in steer mode, the next
+ * `todo done` is checked as if OMP_STRATA_DONE_GATE_TODO were on (for 30
+ * minutes, once). The hand-off goes through globalThis so it works whether
+ * omp loads the two files as one module graph or two.
+ *
  * Switches (on, log, off):
  *   OMP_STRATA_DONE_GATE_GOAL  goal complete, default on
  *   OMP_STRATA_DONE_GATE_TODO  todo done, default log
@@ -385,6 +391,48 @@ export function scopeFix(phases: Phase[], input: unknown): { input: Record<strin
 			`</system-interrupt>`,
 		].join("\n"),
 	};
+}
+
+// ---------------------------------------------------------------------------
+// Watcher hand-off
+
+const BUS_KEY = "__ompStrataWatcher";
+interface Bus {
+	overclaim?: { item?: string; until: number; reason: string };
+}
+
+function bus(): Bus {
+	const g = globalThis as Record<string, unknown>;
+	if (!g[BUS_KEY] || typeof g[BUS_KEY] !== "object") g[BUS_KEY] = {};
+	return g[BUS_KEY] as Bus;
+}
+
+/** Arm the gate: the next `todo done` (within `minutes`) is checked as if the todo gate were on. */
+export function armDoneGate(item: string | undefined, reason: string, minutes = 30, now = Date.now()): void {
+	bus().overclaim = { item, until: now + minutes * 60000, reason };
+}
+
+/** The armed watcher verdict, or undefined when none is armed or it expired. */
+export function doneGateArmed(now = Date.now()): { item?: string; reason: string } | undefined {
+	const o = bus().overclaim;
+	if (!o) return undefined;
+	if (o.until < now) {
+		bus().overclaim = undefined;
+		return undefined;
+	}
+	return { item: o.item, reason: o.reason };
+}
+
+export function disarmDoneGate(): void {
+	bus().overclaim = undefined;
+}
+
+/** The todo mode for this call: "on" while the watcher has armed the gate, else the configured mode. */
+export function effectiveTodoMode(configured: Mode, toolName: string, input: unknown, now = Date.now()): { mode: Mode; armed?: { item?: string; reason: string } } {
+	if (configured === "off" || toolName !== "todo" || field(input, "op") !== "done") return { mode: configured };
+	const armed = doneGateArmed(now);
+	if (!armed) return { mode: configured };
+	return { mode: "on", armed };
 }
 
 // ---------------------------------------------------------------------------
@@ -744,7 +792,13 @@ export default function (pi: {
 		record(state, event, Date.now());
 	});
 	pi.on("tool_call", (event, ctx) => {
-		const decision = decide(state, event, modes, branchOf(ctx));
+		const todo = effectiveTodoMode(modes.todo, event.toolName, event.input);
+		const decision = decide(state, event, todo.armed ? { ...modes, todo: todo.mode } : modes, branchOf(ctx));
+		if (todo.armed) {
+			// One checked claim per watcher verdict.
+			disarmDoneGate();
+			pi.logger?.warn?.("done-gate: watcher armed this check", { reason: todo.armed.reason, item: todo.armed.item?.slice(0, 60), refused: !!decision?.block });
+		}
 		if (!decision) return undefined;
 		if (decision.log) pi.logger?.warn?.(decision.log.message, decision.log.fields);
 		if (decision.block) return { block: true, reason: decision.reason };
