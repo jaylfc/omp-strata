@@ -109,6 +109,25 @@ export function viewedByBash(command: string): string[] {
 	return words.filter(word => !word.startsWith("-") && !/^\d+(?:,\d+)?p?$/.test(word));
 }
 
+/**
+ * Absolute paths a bash command views, following `cd` the way the shell would: `cd cinderline && cat tools/x.mjs`
+ * views cinderline/tools/x.mjs. Segments are split on &&, ||, ; and newlines; a pipe stays in its segment.
+ */
+export function viewedPaths(command: string, base: string): string[] {
+	const out: string[] = [];
+	let dir = base;
+	for (const segment of command.split(/\s*(?:&&|\|\||;|\n)\s*/)) {
+		const cd = /^cd\s+("[^"]+"|'[^']+'|\S+)\s*$/.exec(segment.trim());
+		if (cd) {
+			const target = cd[1].replace(/^["']|["']$/g, "").replace(/^~(?=\/|$)/, process.env.HOME ?? "~");
+			dir = nodePath.resolve(dir, target);
+			continue;
+		}
+		for (const word of viewedByBash(segment)) out.push(nodePath.resolve(dir, cleanPath(word)));
+	}
+	return out;
+}
+
 /** Record every file a successful tool result shows the model. */
 export function recordResult(seen: SeenMap, cwd: string, result: ToolResult): void {
 	if (result.isError) return;
@@ -124,8 +143,9 @@ export function recordResult(seen: SeenMap, cwd: string, result: ToolResult): vo
 	if (result.toolName === "bash") {
 		const command = field(result.input, "command");
 		if (typeof command === "string") {
-			for (const word of viewedByBash(command)) {
-				const abs = resolve(cwd, word);
+			const toolCwd = field(result.input, "cwd");
+			const base = typeof toolCwd === "string" && toolCwd ? nodePath.resolve(cwd, toolCwd) : cwd;
+			for (const abs of viewedPaths(command, base)) {
 				const time = mtime(abs);
 				if (time !== undefined) seen.set(abs, time);
 			}
