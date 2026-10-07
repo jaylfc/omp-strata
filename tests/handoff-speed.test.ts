@@ -70,13 +70,17 @@ test("restorePrefix undefined when a slot does not line up", () => {
 });
 
 test("restorePrefix replaces prefix and counts exactly 1 changed", () => {
-	const sent = [{ role: "user", content: "same", tool_call_id: "id", tool_calls: [{ id: "t1" }] }];
+	const sent = [
+		{ role: "user", content: "same" },
+		{ role: "assistant", content: "before", tool_calls: [{ id: "t1" }] },
+	];
 	const handoff = [
-		{ role: "user", content: "changed", tool_call_id: "id", tool_calls: [{ id: "t1" }] },
+		{ role: "user", content: "same" },
+		{ role: "assistant", content: "after", tool_calls: [{ id: "t1" }] },
 		{ role: "user", content: HANDOFF_MARKER },
 	];
 	const result = restorePrefix(sent, handoff);
-	expect(result).toEqual({ messages: [...sent, handoff[1]], changed: 1 });
+	expect(result).toEqual({ messages: [sent[0], sent[1], handoff[2]], changed: 1 });
 });
 
 test("appendLengthLimit appends instruction to string content", () => {
@@ -101,27 +105,30 @@ test("appendLengthLimit returns same object when LENGTH_MARKER present", () => {
 	expect(result).toBe(msg);
 });
 
+function withMode(value: string | undefined, run: () => void) {
+	const original = process.env.OMP_STRATA_HANDOFF_SPEED;
+	if (value === undefined) delete process.env.OMP_STRATA_HANDOFF_SPEED;
+	else process.env.OMP_STRATA_HANDOFF_SPEED = value;
+	try {
+		run();
+	} finally {
+		if (original === undefined) delete process.env.OMP_STRATA_HANDOFF_SPEED;
+		else process.env.OMP_STRATA_HANDOFF_SPEED = original;
+	}
+}
+
 test("mode unset gives on", () => {
-	expect(mode()).toBe("on");
+	withMode(undefined, () => expect(mode()).toBe("on"));
 });
 
 test("mode OFF gives off", () => {
-	const original = process.env.OMP_STRATA_HANDOFF_SPEED;
-	process.env.OMP_STRATA_HANDOFF_SPEED = " OFF ";
-	expect(mode()).toBe("off");
-	process.env.OMP_STRATA_HANDOFF_SPEED = original;
+	withMode(" OFF ", () => expect(mode()).toBe("off"));
 });
 
 test("mode prefix gives prefix", () => {
-	const original = process.env.OMP_STRATA_HANDOFF_SPEED;
-	process.env.OMP_STRATA_HANDOFF_SPEED = "prefix";
-	expect(mode()).toBe("prefix");
-	process.env.OMP_STRATA_HANDOFF_SPEED = original;
+	withMode("prefix", () => expect(mode()).toBe("prefix"));
 });
 
 test("mode junk gives on", () => {
-	const original = process.env.OMP_STRATA_HANDOFF_SPEED;
-	process.env.OMP_STRATA_HANDOFF_SPEED = "junk";
-	expect(mode()).toBe("on");
-	process.env.OMP_STRATA_HANDOFF_SPEED = original;
+	withMode("junk", () => expect(mode()).toBe("on"));
 });
