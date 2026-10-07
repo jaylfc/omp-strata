@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { armDoneGate, decide, disarmDoneGate, doneGateArmed, effectiveTodoMode, newState, record } from "../agent/extensions/done-gate.ts";
 import watcher, {
+	samePath,
 	askWatcher,
 	buildDigest,
 	loadConfig,
@@ -243,4 +244,30 @@ test("extension: log mode checks in the background every N results and logs, nev
 		}
 		rmSync(dir, { recursive: true });
 	}
+});
+
+test("samePath: directory prefixes match, bare suffixes do not", () => {
+	expect(samePath("cinderline/server/net.js", "/home/jay/dev/strata/omp/cinderline/server/net.js")).toBe(true);
+	expect(samePath("./a.js", "a.js")).toBe(true);
+	expect(samePath("a.js", "src/a.js")).toBe(false);
+	expect(samePath("xa.js", "src/a.js")).toBe(false);
+	expect(samePath("src/a.js", "lib/a.js")).toBe(false);
+});
+
+test("re-reads of one file are not reset by an edit to another file with the same name", () => {
+	const branch = [
+		goal,
+		...todo([["Item", "in_progress"]]),
+		...Array.from({ length: 3 }, () => call("read", { path: "src/a.js" }, "x")).flat(),
+		...call("edit", { path: "lib/a.js" }, "ok"),
+		...Array.from({ length: 2 }, () => call("read", { path: "src/a.js" }, "x")).flat(),
+	];
+	expect(buildDigest(branch).facts.maxFileReads).toBe(5);
+	const fixed = [...branch.slice(0, -4), ...call("edit", { path: "src/a.js" }, "ok"), ...call("read", { path: "src/a.js" }, "x")];
+	expect(buildDigest(fixed).facts.maxFileReads).toBe(3);
+});
+
+test("editsWindow counts ast_edit even when its path is only in the result text", () => {
+	const branch = [goal, ...todo([["Item", "in_progress"]]), ...call("ast_edit", { pattern: "foo" }, "[src/a.js#AB12]\nok")];
+	expect(buildDigest(branch).facts.editsWindow).toBe(1);
 });

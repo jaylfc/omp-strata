@@ -298,6 +298,13 @@ function scriptsWritten(call: CallRec): string[] {
 	return out;
 }
 
+/** Same file: equal, or one is absolute and ends with the other relative path (a/b.js vs /cwd/a/b.js). A relative suffix (a.js vs src/a.js) is a different file. */
+export function samePath(a: string, b: string): boolean {
+	const x = a.replace(/^\.\//, "");
+	const y = b.replace(/^\.\//, "");
+	return x === y || (x.startsWith("/") && x.endsWith(`/${y}`)) || (y.startsWith("/") && y.endsWith(`/${x}`));
+}
+
 function normalizedCommand(call: CallRec): string | undefined {
 	if (call.name === "bash") return `bash:${commandOf(call).replace(/\s+/g, " ").trim()}`;
 	if (call.name === "eval") return `eval:${String(call.args.code ?? call.args.input ?? "").replace(/\s+/g, " ").trim()}`;
@@ -377,7 +384,7 @@ export function computeFacts(snap: Snapshot, window = WINDOW): Facts {
 		const changed = changedPaths({ toolName: c.name, input: c.args, isError: c.isError, content: [{ type: "text", text: c.text }] });
 		if (changed.length) {
 			repeats.clear();
-			for (const p of changed) for (const k of [...reads.keys()]) if (p.endsWith(k) || k.endsWith(p)) reads.delete(k);
+			for (const p of changed) for (const k of [...reads.keys()]) if (samePath(p, k)) reads.delete(k);
 			continue;
 		}
 		const key = normalizedCommand(c);
@@ -419,7 +426,7 @@ export function computeFacts(snap: Snapshot, window = WINDOW): Facts {
 		probesFailItem: probesFail,
 		passAfterLastEdit: lastPassIdx > lastEditIdx,
 		newScriptsItem: [...scripts].slice(-6),
-		editsWindow: win.filter(c => changedPaths({ toolName: c.name, input: c.args, isError: c.isError, content: [] }).length > 0 || ((c.name === "edit" || c.name === "write") && !c.isError)).length,
+		editsWindow: win.filter(c => !c.isError && (["edit", "write", "ast_edit"].includes(c.name) || changedPaths({ toolName: c.name, input: c.args, isError: c.isError, content: [{ type: "text", text: c.text }] }).length > 0)).length,
 		readsWindow: win.filter(c => c.name === "read" || c.name === "grep" || c.name === "glob").length,
 		errorsWindow: win.filter(c => c.isError).length,
 		envErrorsWindow: win.filter(c => (c.isError || (c.exit ?? 0) !== 0) && ENV_ERR_RE.test(c.text.slice(-4000))).length,
