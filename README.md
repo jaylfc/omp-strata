@@ -146,6 +146,13 @@ Deferred: a verifier in a fresh context (a `task` subagent, or the side model); 
 
 Every check also logs `watcher: verdict` in the omp log.
 
+Measured on 417 replayed windows of the 2026-10-03 to 10-06 Cinderline session, scored on 31 frozen held-out windows (lab experiment 026):
+- The computed-facts rules caught 10 of 16 problem windows, with 3 false alarms in 15 ok windows.
+- Kev-4B Q4_K_M on `/v1/systemone` caught 9 of 16 with 2 false alarms, at 4.5 s per check and +3.6–4.3 GB on the Mac.
+- Gemma 4 12B on the side model caught 7 of 16 with no false alarms, at about 15 s per check under live traffic.
+
+Start in `log` mode on the side model. Steer mode waits for a week of labelled log rows.
+
 ## Vision on the coder
 
 `modelRoles.vision` is `strata/qwen3.8-flash-next-coder-iq1_m`. `read <path>?q=<question>` uses that role. The coder pack is the GSQ-RCO Coder quant, which keeps the vision pathway. Strata reads pictures with a separate `strata-vision` process and the coder repo's `mmproj-Qwen3.8-Flash-Next-BF16.gguf` (about 0.9 GB). That is not a switch to the full unpruned model.
