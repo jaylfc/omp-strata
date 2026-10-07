@@ -4,6 +4,9 @@ import os from "node:os";
 import path from "node:path";
 import { armDoneGate, decide, disarmDoneGate, doneGateArmed, effectiveTodoMode, newState, record } from "../agent/extensions/done-gate.ts";
 import watcher, {
+	cascadeConfirms,
+	cascadeFlag,
+	runCascade,
 	samePath,
 	askWatcher,
 	buildDigest,
@@ -274,4 +277,63 @@ test("re-reads of one file are not reset by an edit to another file with the sam
 test("editsWindow counts ast_edit even when its path is only in the result text", () => {
 	const branch = [goal, ...todo([["Item", "in_progress"]]), ...call("ast_edit", { pattern: "foo" }, "[src/a.js#AB12]\nok")];
 	expect(buildDigest(branch).facts.editsWindow).toBe(1);
+});
+
+test("cascade flag: overclaiming on one verdict; other problems need rules and two System One verdicts in a row", () => {
+	expect(cascadeFlag(v("overclaiming", 0.8), v("progressing", 0.9), undefined, 0.3)).toBe("overclaiming");
+	expect(cascadeFlag(v("progressing", 0.6), v("overclaiming", 0.35), undefined, 0.3)).toBe("overclaiming");
+	expect(cascadeFlag(v("looping", 0.7), v("looping", 0.5), v("looping", 0.4), 0.3)).toBe("looping");
+	expect(cascadeFlag(v("looping", 0.7), v("looping", 0.5), v("drifting", 0.4), 0.3)).toBeUndefined();
+	expect(cascadeFlag(v("looping", 0.7), v("looping", 0.5), undefined, 0.3)).toBeUndefined();
+	expect(cascadeFlag(v("progressing", 0.6), v("looping", 0.9), v("looping", 0.9), 0.3)).toBeUndefined();
+	expect(cascadeFlag(v("looping", 0.7), v("looping", 0.2), v("looping", 0.9), 0.3)).toBeUndefined();
+	expect(cascadeConfirms("overclaiming", undefined)).toBe(true);
+	expect(cascadeConfirms("looping", v("drifting", 0.9))).toBe(true);
+	expect(cascadeConfirms("looping", v("progressing", 0.9))).toBe(false);
+	expect(cascadeConfirms("looping", undefined)).toBe(false);
+	expect(cascadeConfirms(undefined, v("looping", 1))).toBe(false);
+});
+
+test("runCascade: the chat model is asked only for non-overclaiming flags and writes the steer", async () => {
+	const loop = [goal, ...todo([["Item", "in_progress"]]), ...Array.from({ length: 6 }, () => call("read", { path: "server/net.js:132-137" }, "x")).flat()];
+	const d = buildDigest(loop);
+	const asked: string[] = [];
+	const fake = (s1State: string, chatState: string) => async (url: string) => {
+		asked.push(url);
+		if (url.endsWith("/systemone")) return { ok: true, status: 200, json: async () => ({ answers: { state: { choice: s1State, probabilities: { [s1State]: 0.6 } }, steer: { choice: "none" } } }) };
+		return { ok: true, status: 200, json: async () => ({ choices: [{ message: { content: JSON.stringify({ state: chatState, confidence: 0.9, steer: "Stop re-reading net.js; edit input.js." }) } }] }) };
+	};
+	const cfg = { ...loadConfig({}, {}), api: "cascade" as const, url: "http://mac:1234/v1", s1Url: "http://mac:8900/v1", s1Threshold: 0.3 };
+	const prev = v("looping", 0.5);
+	const yes = await runCascade(cfg, d.text, d.facts, prev, fake("looping", "looping"));
+	expect(yes.confirmed).toBe(true);
+	expect(yes.verdict.state).toBe("looping");
+	expect(yes.verdict.steer).toBe("Stop re-reading net.js; edit input.js.");
+	expect(asked).toEqual(["http://mac:8900/v1/systemone", "http://mac:1234/v1/chat/completions"]);
+	const no = await runCascade(cfg, d.text, d.facts, prev, fake("looping", "progressing"));
+	expect(no.confirmed).toBe(false);
+	expect(no.verdict.state).toBe("progressing");
+	asked.length = 0;
+	const first = await runCascade(cfg, d.text, d.facts, undefined, fake("looping", "looping"));
+	expect(first.flag).toBeUndefined();
+	expect(asked).toEqual(["http://mac:8900/v1/systemone"]);
+	const c = new WatchController({ mode: "steer", threshold: 0.9, steerGapMin: 15 });
+	expect(c.onCascade(yes, d.facts, 0).steer).toContain("Watcher (looping, cascade): Stop re-reading net.js");
+	expect(c.onCascade(no, d.facts, 1).note).toContain("vetoed by progressing");
+	expect(c.s1Prev?.state).toBe("looping");
+	const claim = { verdict: { ...v("overclaiming", 0.4), steer: "verify" }, flag: "overclaiming" as const, confirmed: true, s1: v("overclaiming", 0.4), s1Threshold: 0.3 };
+	expect(new WatchController({ mode: "steer", threshold: 0.9, steerGapMin: 15 }).onCascade(claim, d.facts, 0).armGate).toBe(true);
+	const weak = { ...claim, s1: v("overclaiming", 0.2) };
+	expect(new WatchController({ mode: "steer", threshold: 0.9, steerGapMin: 15 }).onCascade(weak, d.facts, 0).armGate).toBe(false);
+	const log = new WatchController({ mode: "log", threshold: 0.9, steerGapMin: 15 });
+	const logged = log.onCascade(yes, d.facts, 0);
+	expect(logged.steer).toBeUndefined();
+	expect(logged.armGate).toBe(false);
+});
+
+test("config: a System One URL makes the cascade the default; without it the API stays chat", () => {
+	expect(loadConfig({}, { WATCHER_S1_URL: "http://mac:8900/v1/" })).toMatchObject({ api: "cascade", s1Url: "http://mac:8900/v1", s1Threshold: 0.3, threshold: 0.9 });
+	expect(loadConfig({}, {}).api).toBe("chat");
+	expect(loadConfig({ OMP_STRATA_WATCHER_API: "cascade" }, {}).api).toBe("chat");
+	expect(loadConfig({ OMP_STRATA_WATCHER_API: "chat" }, { WATCHER_S1_URL: "http://mac:8900/v1" }).api).toBe("chat");
 });

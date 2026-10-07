@@ -27,6 +27,13 @@
  *   Options are shuffled per call (first-option bias).
  * - api=rules: no model; the rule baseline below (also the fallback when the
  *   endpoint fails).
+ * - api=cascade (the default when OMP_STRATA_WATCHER_S1_URL / WATCHER_S1_URL
+ *   names a System One endpoint): the rules plus the System One model flag
+ *   first (overclaiming on one verdict; anything else needs the rules and two
+ *   System One verdicts in a row), then the chat model confirms or vetoes
+ *   only the non-overclaiming flags and writes the steer line. Overclaiming
+ *   flags stand, since the done gate backstops them. On the 026 replay this
+ *   cut false alarms from 5/15 to 3/15 for 13/16 to 11/16 recall.
  *
  * Modes (OMP_STRATA_WATCHER): off, log (default), steer.
  * - log: nothing reaches the coder. Each check is appended (digest, facts,
@@ -61,7 +68,7 @@ export type WatchState = (typeof STATES)[number];
 export const STEERS = ["none", "commit_now", "verify_item", "stop_side_work", "new_approach", "fix_environment", "back_to_item"] as const;
 export type SteerId = (typeof STEERS)[number];
 export type WatcherMode = "off" | "log" | "steer";
-export type WatcherApi = "chat" | "system1" | "rules";
+export type WatcherApi = "chat" | "system1" | "rules" | "cascade";
 
 export const WINDOW = 12;
 export const REPEAT_SPAN = Number(process.env.OMP_STRATA_WATCHER_REPEAT_SPAN) > 0 ? Number(process.env.OMP_STRATA_WATCHER_REPEAT_SPAN) : 24;
@@ -739,6 +746,10 @@ export interface WatcherConfig {
 	timeoutS: number;
 	steerGapMin: number;
 	log: string;
+	/** Cascade detector: a System One endpoint (Kev-4B on llama.cpp /v1/systemone). */
+	s1Url: string;
+	/** Cascade detector threshold for the System One verdict. */
+	s1Threshold: number;
 }
 
 const CONFIG_DIR = path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"), "omp-strata");
@@ -757,7 +768,9 @@ export function readSettings(file = path.join(CONFIG_DIR, "settings.env")): Reco
 }
 
 /** Calibrated on the 026 replay set (train split); see experiments/026-watcher/README.md in the lab. */
-export const DEFAULT_THRESHOLD = { chat: 0.9, system1: 0.4, rules: 0.7 } as const;
+export const DEFAULT_THRESHOLD = { chat: 0.9, system1: 0.4, rules: 0.7, cascade: 0.9 } as const;
+/** Cascade: Kev's threshold for flagging (026 train fit for the rules + Kev flag). */
+export const CASCADE_S1_THRESHOLD = 0.3;
 
 export function loadConfig(env: Record<string, string | undefined> = process.env, settings: Record<string, string> = readSettings()): WatcherConfig {
 	const pick = (envKey: string, setKey: string, fallback: string) => (env[envKey] ?? settings[setKey] ?? fallback).trim();
@@ -766,8 +779,10 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 		return Number.isFinite(n) && n > 0 ? n : fallback;
 	};
 	const modeRaw = pick("OMP_STRATA_WATCHER", "WATCHER_MODE", "log").toLowerCase();
-	const apiRaw = pick("OMP_STRATA_WATCHER_API", "WATCHER_API", "chat").toLowerCase();
-	const api: WatcherApi = apiRaw === "system1" || apiRaw === "rules" ? apiRaw : "chat";
+	const s1Url = pick("OMP_STRATA_WATCHER_S1_URL", "WATCHER_S1_URL", "").replace(/\/+$/, "");
+	// Both a System One detector and a chat model configured: the cascade is the default.
+	const apiRaw = pick("OMP_STRATA_WATCHER_API", "WATCHER_API", s1Url ? "cascade" : "chat").toLowerCase();
+	const api: WatcherApi = apiRaw === "system1" || apiRaw === "rules" || (apiRaw === "cascade" && s1Url) ? (apiRaw as WatcherApi) : "chat";
 	return {
 		mode: modeRaw === "off" || modeRaw === "steer" ? modeRaw : "log",
 		api,
@@ -780,6 +795,8 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 		timeoutS: num(pick("OMP_STRATA_WATCHER_TIMEOUT_S", "WATCHER_TIMEOUT_S", ""), 90),
 		steerGapMin: num(pick("OMP_STRATA_WATCHER_STEER_GAP_MIN", "WATCHER_STEER_GAP_MIN", ""), 15),
 		log: pick("OMP_STRATA_WATCHER_LOG", "WATCHER_LOG", path.join(CONFIG_DIR, "watcher.jsonl")),
+		s1Url,
+		s1Threshold: num(pick("OMP_STRATA_WATCHER_S1_THRESHOLD", "WATCHER_S1_THRESHOLD", ""), CASCADE_S1_THRESHOLD),
 	};
 }
 
@@ -791,6 +808,7 @@ type Fetch = (url: string, init: { method: string; headers: Record<string, strin
 export async function askWatcher(cfg: WatcherConfig, digest: string, facts: Facts, fetchFn: Fetch = fetch as unknown as Fetch): Promise<Verdict> {
 	const started = Date.now();
 	if (cfg.api === "rules") return { ...ruleVerdict(facts), ms: 0 };
+	if (cfg.api === "cascade") throw new Error("askWatcher: use runCascade for api=cascade");
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), cfg.timeoutS * 1000);
 	(timer as { unref?: () => void }).unref?.();
@@ -820,6 +838,60 @@ export async function askWatcher(cfg: WatcherConfig, digest: string, facts: Fact
 }
 
 // ---------------------------------------------------------------------------
+// Cascade: rules + Kev flag, the chat model confirms or vetoes (026, variant a)
+
+const PROBLEM = new Set<WatchState>(["looping", "drifting", "stuck_env", "overclaiming"]);
+
+/**
+ * The fast detector. Overclaiming: the rules, or one System One verdict at or above `t`. Any other problem: the
+ * rules flag a problem and the System One model gives the same problem state at or above `t` on this check and on
+ * the previous one. Undefined when nothing is flagged.
+ */
+export function cascadeFlag(rules: Verdict, s1: Verdict, s1Prev: Verdict | undefined, t: number): WatchState | undefined {
+	if (rules.state === "overclaiming" || (s1.state === "overclaiming" && s1.confidence >= t)) return "overclaiming";
+	if (PROBLEM.has(rules.state) && PROBLEM.has(s1.state) && s1.confidence >= t && s1Prev?.state === s1.state && s1Prev.confidence >= t) return s1.state;
+	return undefined;
+}
+
+/** Variant (a): an overclaiming flag stands (the done gate backstops it); any other flag needs the chat model to call it a problem. */
+export function cascadeConfirms(flag: WatchState | undefined, chat: Verdict | undefined): boolean {
+	if (!flag) return false;
+	if (flag === "overclaiming") return true;
+	return !!chat && PROBLEM.has(chat.state);
+}
+
+export interface CascadeResult {
+	verdict: Verdict;
+	flag?: WatchState;
+	/** The System One threshold the flag was decided with (the cascade's own threshold for Kev, not the chat threshold). */
+	s1Threshold: number;
+	confirmed: boolean;
+	s1: Verdict;
+	chat?: Verdict;
+}
+
+/** Run the cascade. The chat model is asked only about non-overclaiming flags. */
+export async function runCascade(cfg: WatcherConfig, digest: string, facts: Facts, s1Prev: Verdict | undefined, fetchFn: Fetch = fetch as unknown as Fetch): Promise<CascadeResult> {
+	const started = Date.now();
+	const rules = ruleVerdict(facts);
+	const s1 = await askWatcher({ ...cfg, api: "system1", url: cfg.s1Url }, digest, facts, fetchFn);
+	const flag = cascadeFlag(rules, s1, s1Prev, cfg.s1Threshold);
+	let chat: Verdict | undefined;
+	if (flag && flag !== "overclaiming") {
+		try {
+			chat = await askWatcher({ ...cfg, api: "chat" }, digest, facts, fetchFn);
+		} catch {
+			chat = undefined;
+		}
+	}
+	const confirmed = cascadeConfirms(flag, chat);
+	const state: WatchState = confirmed && flag ? flag : s1.state === "waiting" ? "waiting" : "progressing";
+	const steerText = confirmed && flag ? (flag !== "overclaiming" && chat?.steer?.trim()) || steerLine(STEER_FOR[flag], facts) : "";
+	const verdict: Verdict = { state, confidence: confirmed ? Math.max(s1.confidence, chat?.confidence ?? 0) : 1 - s1.confidence, steer: steerText, steerId: confirmed && flag ? STEER_FOR[flag] : "none", source: "cascade", ms: Date.now() - started };
+	return { verdict, flag, confirmed, s1, chat, s1Threshold: cfg.s1Threshold };
+}
+
+// ---------------------------------------------------------------------------
 // The controller
 
 export const STEER_PREFIX = "Watcher";
@@ -833,6 +905,27 @@ export interface Decision {
 export class WatchController {
 	history: Verdict[] = [];
 	lastSteerAt = -Infinity;
+	/** The previous System One verdict, for the cascade's two-in-a-row rule. */
+	s1Prev?: Verdict;
+
+	/** Cascade: the confirmation is already in the result, so one confirmed result acts (rate-limited). */
+	onCascade(r: CascadeResult, facts: Facts, now: number): Decision {
+		this.s1Prev = r.s1;
+		this.history.push(r.verdict);
+		if (this.history.length > 20) this.history.shift();
+		if (!r.flag) return { note: "not flagged" };
+		if (!r.confirmed) return { note: r.chat ? `flag ${r.flag} vetoed by ${r.chat.state}` : `flag ${r.flag} not confirmed (chat model unavailable)` };
+		// An overclaiming flag arms the gate only when it came from the rules (claims without a probe are a computed
+		// fact) or from a System One verdict at or above the cascade's own threshold; the chat threshold does not apply
+		// because the chat model is not asked about claims.
+		const armGate = r.flag === "overclaiming" && (ruleVerdict(facts).state === "overclaiming" || (r.s1.state === "overclaiming" && r.s1.confidence >= r.s1Threshold));
+		if (r.flag === "looping" && facts.guardWindow > 0) return { note: "looping left to the fail-loop guard (it fired in this window)" };
+		if (this.cfg.mode !== "steer") return { note: "confirmed (log mode: no steer)", armGate: false };
+		if (now - this.lastSteerAt < this.cfg.steerGapMin * 60000) return { note: "confirmed, rate-limited", armGate };
+		if (!r.verdict.steer) return { note: "confirmed", armGate };
+		this.lastSteerAt = now;
+		return { note: "confirmed", armGate, steer: `${STEER_PREFIX} (${r.flag.replace("_", " ")}, cascade): ${r.verdict.steer}` };
+	}
 	constructor(readonly cfg: Pick<WatcherConfig, "mode" | "threshold" | "steerGapMin">) {}
 
 	/** Decide what to do with a new verdict. Steer only on two consecutive same-state verdicts at or above the threshold. */
@@ -922,23 +1015,27 @@ export default function (pi: {
 			pi.logger?.warn?.("watcher: digest failed", { error: String(error) });
 			return;
 		}
-		askWatcher(cfg, digest.text, digest.facts)
+		const ask: Promise<{ verdict: Verdict; cascade?: CascadeResult }> =
+			cfg.api === "cascade"
+				? runCascade(cfg, digest.text, digest.facts, controller.s1Prev).then(c => ({ verdict: c.verdict, cascade: c }))
+				: askWatcher(cfg, digest.text, digest.facts).then(verdict => ({ verdict }));
+		ask
 			.catch(error => {
 				pi.logger?.warn?.("watcher: endpoint failed, using rules", { error: String(error).slice(0, 200) });
-				return { ...ruleVerdict(digest.facts), source: "rules-fallback" } as Verdict;
+				return { verdict: { ...ruleVerdict(digest.facts), source: "rules-fallback" } as Verdict, cascade: undefined };
 			})
-			.then(verdict => {
+			.then(({ verdict, cascade }) => {
 				const now = Date.now();
 				// The rule baseline rides along in every row, so the log pairs model and rules (weekly routine).
 				const rules = ruleVerdict(digest.facts);
-				const decision = controller.onVerdict(verdict, digest.facts, now);
+				const decision = cascade ? controller.onCascade(cascade, digest.facts, now) : controller.onVerdict(verdict, digest.facts, now);
 				if (decision.armGate) armDoneGate(digest.facts.item, `${verdict.state} ${verdict.confidence.toFixed(2)}`, 30, now);
 				if (decision.steer) pi.sendUserMessage?.(decision.steer, { deliverAs: "steer", attribution: "agent" });
 				const fields = { state: verdict.state, confidence: Math.round(verdict.confidence * 100) / 100, source: verdict.source, ms: verdict.ms, decision: decision.note, steered: !!decision.steer, item: digest.facts.item?.slice(0, 60) };
 				pi.logger?.warn?.("watcher: verdict", fields);
 				try {
 					mkdirSync(path.dirname(cfg.log), { recursive: true });
-					appendFileSync(cfg.log, `${JSON.stringify({ at: new Date(now).toISOString(), trigger, calls: digest.calls, mode: cfg.mode, api: cfg.api, model: cfg.api === "chat" ? cfg.model : cfg.api, verdict: { ...verdict, raw: undefined }, rules: verdict.source.startsWith("rules") ? undefined : { state: rules.state, confidence: rules.confidence }, decision: decision.note, steer: decision.steer, facts: digest.facts, digest: digest.text })}\n`);
+					appendFileSync(cfg.log, `${JSON.stringify({ at: new Date(now).toISOString(), trigger, calls: digest.calls, mode: cfg.mode, api: cfg.api, model: cfg.api === "chat" || cfg.api === "cascade" ? cfg.model : cfg.api, verdict: { ...verdict, raw: undefined }, cascade: cascade && { flag: cascade.flag, confirmed: cascade.confirmed, s1: { state: cascade.s1.state, confidence: cascade.s1.confidence, ms: cascade.s1.ms }, chat: cascade.chat && { state: cascade.chat.state, confidence: cascade.chat.confidence, steer: cascade.chat.steer, ms: cascade.chat.ms } }, rules: verdict.source.startsWith("rules") ? undefined : { state: rules.state, confidence: rules.confidence }, decision: decision.note, steer: decision.steer, facts: digest.facts, digest: digest.text })}\n`);
 				} catch {
 					// Logging must never disturb the run.
 				}
