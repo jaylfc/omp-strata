@@ -24,6 +24,7 @@
  */
 import fs from "node:fs";
 import nodePath from "node:path";
+import os from "node:os";
 
 const MODE = (process.env.OMP_STRATA_READ_GUARD ?? "log").toLowerCase();
 /** Attempts of one refused call before it is let through. */
@@ -109,6 +110,82 @@ export function viewedByBash(command: string): string[] {
 	return words.filter(word => !word.startsWith("-") && !/^\d+(?:,\d+)?p?$/.test(word));
 }
 
+/**
+ * Split a shell command on operators that are outside quotes and not backslash-escaped.
+ * Longer operators come first in `ops`, so `||` is not read as two pipes.
+ */
+export function splitShell(command: string, ops: readonly string[]): string[] {
+	const parts: string[] = [];
+	let current = "";
+	let quote: string | null = null;
+	for (let i = 0; i < command.length; i++) {
+		const ch = command[i];
+		if (ch === "\\" && quote !== "'") {
+			current += ch + (command[i + 1] ?? "");
+			i++;
+			continue;
+		}
+		if (quote) {
+			if (ch === quote) quote = null;
+			current += ch;
+			continue;
+		}
+		if (ch === '"' || ch === "'") {
+			quote = ch;
+			current += ch;
+			continue;
+		}
+		const op = ops.find(o => command.startsWith(o, i));
+		if (op) {
+			parts.push(current.trim());
+			current = "";
+			i += op.length - 1;
+			continue;
+		}
+		current += ch;
+	}
+	parts.push(current.trim());
+	return parts;
+}
+
+/**
+ * Absolute paths a bash command views, following `cd` the way the shell would: `cd cinderline && cat tools/x.mjs`
+ * views cinderline/tools/x.mjs. Segments are split on &&, ||, ; and newlines outside quotes; a pipe stays in its segment.
+ */
+export function viewedPaths(command: string, base: string): string[] {
+	const out: string[] = [];
+	let dir = base;
+	let previous = base;
+	const home = process.env.HOME || os.homedir();
+	// Split on unquoted, unescaped &&, ||, ; and newlines. A cd inside a pipeline runs in a subshell and moves
+	// nothing, so a segment with a pipe is read as viewing commands from the current directory.
+	for (const segment of splitShell(command, ["&&", "||", ";", "\n"])) {
+		const stages = splitShell(segment, ["|"]);
+		const cd = stages.length > 1 ? null : /^cd(?:\s+(.*))?$/.exec(segment);
+		if (cd) {
+			// Words: quoted, backslash-escaped spaces, or plain; flags (-L, -P, -e, -@) and "--" are skipped.
+			const args = [...(cd[1] ?? "").matchAll(/"([^"]*)"|'([^']*)'|((?:\\.|[^\s"'\\])+)/g)]
+				.map(m => m[1] ?? m[2] ?? m[3].replace(/\\(.)/g, "$1"));
+			let i = 0;
+			while (i < args.length && /^-[LPe@]+$/.test(args[i])) i++;
+			if (args[i] === "--") i++;
+			const target = args[i];
+			const next = target === undefined ? home
+				: target === "-" ? previous
+				: nodePath.resolve(dir, target.replace(/^~(?=\/|$)/, home));
+			previous = dir;
+			dir = next;
+			continue;
+		}
+		// In a pipeline, a cd stage changes nothing and its argument is not a viewed file: skip it.
+		for (const stage of stages) {
+			if (/^\s*cd(?:\s|$)/.test(stage)) continue;
+			for (const word of viewedByBash(stage)) out.push(nodePath.resolve(dir, cleanPath(word)));
+		}
+	}
+	return out;
+}
+
 /** Record every file a successful tool result shows the model. */
 export function recordResult(seen: SeenMap, cwd: string, result: ToolResult): void {
 	if (result.isError) return;
@@ -124,8 +201,9 @@ export function recordResult(seen: SeenMap, cwd: string, result: ToolResult): vo
 	if (result.toolName === "bash") {
 		const command = field(result.input, "command");
 		if (typeof command === "string") {
-			for (const word of viewedByBash(command)) {
-				const abs = resolve(cwd, word);
+			const toolCwd = field(result.input, "cwd");
+			const base = typeof toolCwd === "string" && toolCwd ? nodePath.resolve(cwd, toolCwd) : cwd;
+			for (const abs of viewedPaths(command, base)) {
 				const time = mtime(abs);
 				if (time !== undefined) seen.set(abs, time);
 			}
