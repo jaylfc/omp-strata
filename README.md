@@ -56,6 +56,7 @@ The coder stays the main model. Coding, the main session's screenshots, handoff,
 | Verify before goal complete | `goal-verify.ts`, on | The first `goal complete` of each goal is refused with the objective and a checklist: one `verify_item` per acceptance criterion. The goal completes only when the latest run of every criterion exited 0 and no newer reply has a FAIL line. It refuses 3 times at most per goal. |
 | Lessons | `lessons.ts`, `agent/lessons.jsonl`, on | Short rules shown once per session, at most 3 at a time, after a read, edit, write, bash command, or todo/goal call that matches their tags. `lesson_propose` saves a suggestion to `lessons-proposed.jsonl` only after a probe failed in the session. |
 | Constraint pinning | `handoff-speed.ts`, on (`OMP_STRATA_PIN`) | After each compaction, one hidden note: the goal objective verbatim, the item in progress, and RULES.md when the system prompt lacks it. |
+| Watcher | `watcher.ts`, log-only (`OMP_STRATA_WATCHER=log`) | Every 8 tool results (or 10 minutes into an active run) builds a digest of the current item, the last 12 calls, edits, commits, probes, repeats, guard events and done claims, and asks a second model on another machine for a typed verdict: progressing, looping, drifting, stuck on the environment, overclaiming, or waiting. It never calls the coder's server, never blocks a tool, and in `log` mode never touches the session; every check goes to `~/.config/omp-strata/watcher.jsonl` with the rule baseline beside it. See Watcher. |
 | Game probes | 3 per script since the last edit or write | `where.mjs`, `touchprobe.mjs`, `menutest.mjs`, and the other `cinderline/tools/*.mjs` probes share a count even when the shell pipeline changes. `describe.mjs` is refused. A screenshot question in the main session is `read <path>?q=<question>` on the coder. In a subagent, that read stays on the subagent's model. `judge()` tries the Mac, then the coder. |
 | `completion()` | refused | That eval helper calls the coder and replaces the prefix. |
 | Browser eval pre-flight | refused before running | `browser.open("url")` with a string, and `tab.run(() => …)` that touches `document`, `window`, or `fetch` (it runs in Bun, not the page). The refusal shows the accepted form and points at `webcheck`. In a replay of 327 real eval cells from 2026-10-04 these two rules matched 50 of the 133 failures and none of the successes. |
@@ -114,7 +115,36 @@ On 2026-10-06 the coder declared nine goal items done; an independent check foun
 
 Set them in the environment that starts `omp-strata`. Every decision is logged in the omp log as `done-gate: …`, `goal-verify: …`, `lessons: …`, or `strata pin: …`. To see what the coder was told, look for `<system-interrupt reason="done_gate">` and `reason="goal_verify"` in the session.
 
+The watcher (below) can arm the done gate: in steer mode one overclaiming verdict makes the next `todo done` go through the gate as if it were `on`.
+
 Deferred: a verifier in a fresh context (a `task` subagent, or the side model); lesson weights, a byte budget, and a probing curator; and a 3-rep bench A/B before `OMP_STRATA_DONE_GATE_TODO=on`.
+
+## Watcher
+
+`agent/extensions/watcher.ts` judges the coder's progress from outside, on a second machine, so it never takes the coder's single Strata slot or its prefix cache. The design, the labelled replay set and the model bake-off are in the lab, experiment 026.
+
+- **When.** Every `OMP_STRATA_WATCHER_EVERY` tool results (8), or after `OMP_STRATA_WATCHER_MINUTES` (10) while a run is active. One check at a time, in the background, with a 90 s timeout; a tool result never waits for it.
+- **What it sees.** A digest computed from the session branch: the goal, the current todo item and its time, edits and files, commits, probes passed and failed, scripts written on the item, repeats without a file change between them, loop-guard events and other refusals, environment errors, waits, every `todo done` or `goal complete` with or without a passing probe after the last edit, and the last 12 calls with their outcome. Passwords, tokens and keys are redacted before it leaves the machine.
+- **Who answers.** `OMP_STRATA_WATCHER_API`:
+  - `chat` (default): an OpenAI-compatible model answering JSON `{state, confidence, steer}`. With no `WATCHER_URL`/`WATCHER_MODEL` it uses `SIDE_BASE_URL`/`SIDE_MODEL_ID` from settings.env, i.e. the Mac side model.
+  - `system1`: a decision model on llama.cpp `/v1/systemone` (for example Kev-4B). One described choice over the six states, option order shuffled per call; the steer is a template chosen by the state.
+  - `rules`: no model, the computed-facts baseline. It is also the fallback when the endpoint fails.
+- **Modes.** `OMP_STRATA_WATCHER`:
+  - `log` (default): logs only. Each row in `watcher.jsonl` has the digest, facts, verdict, latency, the rule baseline's verdict, and what steer mode would have done.
+  - `steer`: sends one steer line (`Watcher (<state>, NN%): …`) only after two consecutive checks agree on the same non-progress state at or above the threshold, at most once per `OMP_STRATA_WATCHER_STEER_GAP_MIN` minutes (15). A looping verdict is left to the fail-loop guard when the guard fired in the window. One overclaiming verdict at or above the threshold arms the done gate: the next `todo done` is checked as if `OMP_STRATA_DONE_GATE_TODO=on`, once, within 30 minutes.
+  - `off`.
+
+| Switch (environment) | settings.env key | Default |
+| --- | --- | --- |
+| `OMP_STRATA_WATCHER` | `WATCHER_MODE` | `log` |
+| `OMP_STRATA_WATCHER_API` | `WATCHER_API` | `chat` |
+| `OMP_STRATA_WATCHER_URL` | `WATCHER_URL` | `SIDE_BASE_URL` |
+| `OMP_STRATA_WATCHER_MODEL` | `WATCHER_MODEL` | `SIDE_MODEL_ID` |
+| `OMP_STRATA_WATCHER_THRESHOLD` | `WATCHER_THRESHOLD` | chat 0.9, system1 0.4, rules 0.7 (fitted on the 026 train split) |
+| `OMP_STRATA_WATCHER_EVERY` / `_MINUTES` / `_TIMEOUT_S` / `_STEER_GAP_MIN` | `WATCHER_EVERY` / … | 8 / 10 / 90 / 15 |
+| `OMP_STRATA_WATCHER_LOG` | `WATCHER_LOG` | `~/.config/omp-strata/watcher.jsonl` |
+
+Every check also logs `watcher: verdict` in the omp log.
 
 ## Vision on the coder
 
@@ -254,6 +284,7 @@ agent/extensions/handoff-speed.ts        warm handoff prefix, handoff length and
 agent/extensions/done-gate.ts            evidence gate on todo done and goal complete, verify_item tool, items/list fix
 agent/extensions/goal-verify.ts          verification checklist before goal complete, decided by exit codes
 agent/extensions/lessons.ts              lessons shown when their tags match, lesson_propose tool
+agent/extensions/watcher.ts              off-node progress watcher: digest, typed verdict, log or steer, done-gate arming
 agent/lessons.jsonl                      curated lessons (one JSON object per line)
 tests/                                   bun tests for the extensions (`bun test tests/`)
 tools/webcheck/                          one-command browser check that prints JSON

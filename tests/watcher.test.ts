@@ -161,7 +161,11 @@ test("controller: log mode never steers or arms; progressing and waiting never s
 	expect(steer.onVerdict(v("waiting", 1), facts, 1).steer).toBeUndefined();
 	steer.onVerdict(v("looping", 0.9), { ...facts, guardWindow: 2 }, 2);
 	expect(steer.onVerdict(v("looping", 0.9), { ...facts, guardWindow: 2 }, 3).note).toContain("fail-loop guard");
-	steer.onVerdict(v("overclaiming", 0.9), facts, 4);
+	const first = steer.onVerdict(v("overclaiming", 0.9), facts, 4);
+	expect(first.armGate).toBe(true);
+	expect(first.steer).toBeUndefined();
+	expect(steer.onVerdict(v("overclaiming", 0.3), facts, 4.5).armGate).toBeFalsy();
+	steer.onVerdict(v("overclaiming", 0.9), facts, 4.7);
 	const o = steer.onVerdict(v("overclaiming", 0.9), facts, 5);
 	expect(o.armGate).toBe(true);
 	expect(o.steer).toContain("overclaiming");
@@ -192,6 +196,8 @@ test("config: environment wins over settings.env, bad values fall back", () => {
 	const fromFile = loadConfig({}, s);
 	expect(fromFile).toMatchObject({ mode: "steer", api: "system1", url: "http://mac:8900/v1", threshold: 0.4 });
 	expect(loadConfig({ OMP_STRATA_WATCHER: "off" }, s).mode).toBe("off");
+	const side = readSettings((() => { writeFileSync(file, "SIDE_BASE_URL=http://mac:1234/v1\nSIDE_MODEL_ID=google/gemma-4-12b-qat\n"); return file; })());
+	expect(loadConfig({}, side)).toMatchObject({ url: "http://mac:1234/v1", model: "google/gemma-4-12b-qat", api: "chat" });
 	expect(loadConfig({ OMP_STRATA_WATCHER: "loud", OMP_STRATA_WATCHER_EVERY: "-3" }, {})).toMatchObject({ mode: "log", every: 8, api: "chat" });
 	rmSync(dir, { recursive: true });
 });

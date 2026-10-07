@@ -64,7 +64,9 @@ export type WatcherMode = "off" | "log" | "steer";
 export type WatcherApi = "chat" | "system1" | "rules";
 
 export const WINDOW = 12;
-const REPEAT_SPAN = 24;
+export const REPEAT_SPAN = Number(process.env.OMP_STRATA_WATCHER_REPEAT_SPAN) > 0 ? Number(process.env.OMP_STRATA_WATCHER_REPEAT_SPAN) : 24;
+/** Guard events that mean "a loop was caught". Operator pause and done-gate refusals are not loop signals. */
+const LOOP_GUARDS = new Set(["tool_call_loop_blocked", "tool-call-loop-redirect", "thinking-loop-redirect", "thinking-loop", "guard-steer", "thinking_loop_detected"]);
 
 // ---------------------------------------------------------------------------
 // Reading the branch
@@ -258,6 +260,8 @@ export interface Facts {
 	rereadFile?: string;
 	guardWindow: number;
 	guardKinds: string[];
+	/** Other extension refusals in the window (done_gate, goal_verify, operator_pause, ...). */
+	otherRefusals: string[];
 	claims: Claim[];
 	lastReply?: string;
 }
@@ -362,18 +366,38 @@ export function computeFacts(snap: Snapshot, window = WINDOW): Facts {
 		if (i >= itemStart) for (const s of scriptsWritten(c)) scripts.add(s);
 	}
 
+	// Repeats count only while nothing changed: re-running a check after an edit, or re-reading a file after
+	// editing it, is progress (026 replay: the audit re-run after each maps.js fix read as a loop).
 	const repeats = new Map<string, number>();
 	const reads = new Map<string, number>();
+	const bestRepeat = new Map<string, number>();
+	const bestRead = new Map<string, number>();
 	for (let i = repStart; i < end; i++) {
-		const key = normalizedCommand(calls[i]);
-		if (key) repeats.set(key, (repeats.get(key) ?? 0) + 1);
-		const r = readKey(calls[i]);
-		if (r) reads.set(r, (reads.get(r) ?? 0) + 1);
+		const c = calls[i];
+		const changed = changedPaths({ toolName: c.name, input: c.args, isError: c.isError, content: [{ type: "text", text: c.text }] });
+		if (changed.length) {
+			repeats.clear();
+			for (const p of changed) for (const k of [...reads.keys()]) if (p.endsWith(k) || k.endsWith(p)) reads.delete(k);
+			continue;
+		}
+		const key = normalizedCommand(c);
+		if (key) {
+			const n = (repeats.get(key) ?? 0) + 1;
+			repeats.set(key, n);
+			bestRepeat.set(key, Math.max(bestRepeat.get(key) ?? 0, n));
+		}
+		const r = readKey(c);
+		if (r) {
+			const n = (reads.get(r) ?? 0) + 1;
+			reads.set(r, n);
+			bestRead.set(r, Math.max(bestRead.get(r) ?? 0, n));
+		}
 	}
-	const topRepeat = [...repeats.entries()].sort((a, b) => b[1] - a[1])[0];
-	const topRead = [...reads.entries()].sort((a, b) => b[1] - a[1])[0];
+	const topRepeat = [...bestRepeat.entries()].sort((a, b) => b[1] - a[1])[0];
+	const topRead = [...bestRead.entries()].sort((a, b) => b[1] - a[1])[0];
 	const win = calls.slice(winStart, end);
-	const guards = snap.guards.filter(g => g.afterCall >= winStart && g.afterCall <= end);
+	const guards = snap.guards.filter(g => g.afterCall >= winStart && g.afterCall <= end && LOOP_GUARDS.has(g.kind));
+	const refusals = snap.guards.filter(g => g.afterCall >= winStart && g.afterCall <= end && !LOOP_GUARDS.has(g.kind));
 	const minutes = (a: number, b: number) => (a && b ? Math.max(0, Math.round((b - a) / 60000)) : 0);
 	const commitAt = lastCommitIdx >= 0 ? calls[lastCommitIdx].at : calls[itemStart]?.at;
 	return {
@@ -407,6 +431,7 @@ export function computeFacts(snap: Snapshot, window = WINDOW): Facts {
 		rereadFile: topRead && topRead[1] > 1 ? topRead[0] : undefined,
 		guardWindow: guards.length,
 		guardKinds: [...new Set(guards.map(g => g.kind))],
+		otherRefusals: [...new Set(refusals.map(g => g.kind))],
 		claims,
 		lastReply: snap.lastReply && snap.lastReply.afterCall >= winStart ? redact(oneLine(snap.lastReply.text, 240)) : undefined,
 	};
@@ -483,8 +508,8 @@ export function renderDigest(snap: Snapshot, facts: Facts, window = WINDOW): str
 	lines.push(`${facts.item ? "ON THIS ITEM" : "SINCE THE LAST TODO UPDATE"}: ${facts.itemMinutes} min, ${facts.itemCalls} tool calls; edits ${facts.editsItem} on ${facts.filesItem.length} files${facts.filesItem.length ? ` (${facts.filesItem.join(", ")})` : ""}; commits ${facts.commitsItem}; probes passed ${facts.probesPassItem}, failed ${facts.probesFailItem}`);
 	lines.push(`SINCE LAST COMMIT: ${facts.minutesSinceCommit} min, ${facts.editsSinceCommit} file edits uncommitted; a probe passed after the last edit: ${facts.passAfterLastEdit ? "yes" : "no"}`);
 	if (facts.newScriptsItem.length) lines.push(`NEW SCRIPTS WRITTEN ON THIS ITEM: ${facts.newScriptsItem.length} (${facts.newScriptsItem.join(", ")})`);
-	lines.push(`REPEATS (last ${REPEAT_SPAN} calls): most repeated command x${facts.maxCommandRepeat}${facts.repeatedCommand ? ` (${facts.repeatedCommand})` : ""}; most re-read file x${facts.maxFileReads}${facts.rereadFile ? ` (${facts.rereadFile})` : ""}`);
-	lines.push(`GUARD EVENTS IN WINDOW: ${facts.guardWindow}${facts.guardKinds.length ? ` (${facts.guardKinds.join(", ")})` : ""}; environment errors ${facts.envErrorsWindow}; waits ${facts.waitsWindow}; background jobs pending ${facts.jobsPending}`);
+	lines.push(`REPEATS WITHOUT A FILE CHANGE BETWEEN (last ${REPEAT_SPAN} calls): most repeated command x${facts.maxCommandRepeat}${facts.repeatedCommand ? ` (${facts.repeatedCommand})` : ""}; most re-read file x${facts.maxFileReads}${facts.rereadFile ? ` (${facts.rereadFile})` : ""}`);
+	lines.push(`LOOP-GUARD EVENTS IN WINDOW: ${facts.guardWindow}${facts.guardKinds.length ? ` (${facts.guardKinds.join(", ")})` : ""}${facts.otherRefusals.length ? `; other refusals: ${facts.otherRefusals.join(", ")}` : ""}; environment errors ${facts.envErrorsWindow}; waits ${facts.waitsWindow}; background jobs pending ${facts.jobsPending}`);
 	for (const c of facts.claims) lines.push(`CLAIM: ${c.kind} "${c.label}" ${c.evidenced ? "with a passing probe after the last edit" : "WITHOUT a passing probe after the last edit"}${c.refused ? " (refused by the done gate)" : ""}`);
 	lines.push(`LAST ${calls.length - start} TOOL CALLS (${facts.windowMinutes} min):`);
 	for (let i = start; i < calls.length; i++) {
@@ -509,6 +534,8 @@ export interface Verdict {
 	confidence: number;
 	steer: string;
 	steerId?: SteerId;
+	/** System One: the model's own answer to the steer question (logged, not used). */
+	steerChoice?: SteerId;
 	probabilities?: Partial<Record<WatchState, number>>;
 	source: string;
 	ms?: number;
@@ -628,8 +655,11 @@ export function parseSystem1(out: unknown, facts: Facts): Verdict {
 	const state = STATES.includes(s.choice as WatchState) ? (s.choice as WatchState) : "progressing";
 	const probs = obj(s.probabilities);
 	const confidence = typeof probs[state] === "number" ? Number(probs[state]) : typeof s.confidence === "number" ? Number(s.confidence) : 0;
-	const steerId = STEERS.includes(st.choice as SteerId) ? (st.choice as SteerId) : STEER_FOR[state];
-	return { state, confidence, steerId, steer: steerLine(steerId, facts), probabilities: probs as Verdict["probabilities"], source: "system1" };
+	// The steer follows the state. Kev answered the steer question independently of the state question and
+	// often disagreed with itself (026: drifting with "verify_item"), so its own steer choice is only logged.
+	const steerId = STEER_FOR[state];
+	const steerChoice = STEERS.includes(st.choice as SteerId) ? (st.choice as SteerId) : undefined;
+	return { state, confidence, steerId, steerChoice, steer: steerLine(steerId, facts), probabilities: probs as Verdict["probabilities"], source: "system1" };
 }
 
 export const SYSTEM2_PROMPT = [
@@ -701,7 +731,7 @@ export function readSettings(file = path.join(CONFIG_DIR, "settings.env")): Reco
 	const out: Record<string, string> = {};
 	try {
 		for (const line of readFileSync(file, "utf8").split("\n")) {
-			const m = /^\s*(WATCHER_[A-Z_]+)\s*=\s*(.*?)\s*$/.exec(line);
+			const m = /^\s*(WATCHER_[A-Z_]+|SIDE_BASE_URL|SIDE_MODEL_ID)\s*=\s*(.*?)\s*$/.exec(line);
 			if (m) out[m[1]] = m[2].replace(/^(["'])(.*)\1$/, "$2");
 		}
 	} catch {
@@ -711,7 +741,7 @@ export function readSettings(file = path.join(CONFIG_DIR, "settings.env")): Reco
 }
 
 /** Calibrated on the 026 replay set (train split); see experiments/026-watcher/README.md in the lab. */
-export const DEFAULT_THRESHOLD = { chat: 0.8, system1: 0.5, rules: 0.6 } as const;
+export const DEFAULT_THRESHOLD = { chat: 0.9, system1: 0.4, rules: 0.7 } as const;
 
 export function loadConfig(env: Record<string, string | undefined> = process.env, settings: Record<string, string> = readSettings()): WatcherConfig {
 	const pick = (envKey: string, setKey: string, fallback: string) => (env[envKey] ?? settings[setKey] ?? fallback).trim();
@@ -725,8 +755,9 @@ export function loadConfig(env: Record<string, string | undefined> = process.env
 	return {
 		mode: modeRaw === "off" || modeRaw === "steer" ? modeRaw : "log",
 		api,
-		url: pick("OMP_STRATA_WATCHER_URL", "WATCHER_URL", "http://127.0.0.1:1234/v1").replace(/\/+$/, ""),
-		model: pick("OMP_STRATA_WATCHER_MODEL", "WATCHER_MODEL", "side-model"),
+		// With no WATCHER_URL/WATCHER_MODEL, a chat watcher uses the side model apply.sh already configures.
+		url: pick("OMP_STRATA_WATCHER_URL", "WATCHER_URL", settings.SIDE_BASE_URL || "http://127.0.0.1:1234/v1").replace(/\/+$/, ""),
+		model: pick("OMP_STRATA_WATCHER_MODEL", "WATCHER_MODEL", settings.SIDE_MODEL_ID || "side-model"),
 		threshold: num(pick("OMP_STRATA_WATCHER_THRESHOLD", "WATCHER_THRESHOLD", ""), DEFAULT_THRESHOLD[api]),
 		every: Math.round(num(pick("OMP_STRATA_WATCHER_EVERY", "WATCHER_EVERY", ""), 8)),
 		minutes: num(pick("OMP_STRATA_WATCHER_MINUTES", "WATCHER_MINUTES", ""), 10),
@@ -795,10 +826,17 @@ export class WatchController {
 		if (this.history.length > 20) this.history.shift();
 		if (v.state === "progressing" || v.state === "waiting") return { note: v.state };
 		const confirmed = !!prev && prev.state === v.state && prev.confidence >= this.cfg.threshold && v.confidence >= this.cfg.threshold;
-		if (!confirmed) return { note: v.confidence >= this.cfg.threshold ? "first sighting" : "below threshold" };
+		// A claim is one event, so the window before it rarely shows it too (026 replay). One overclaiming verdict
+		// at or above the threshold arms the done gate, which then demands the item's own evidence; that costs
+		// nothing when the claim was real. A steer still needs two verdicts in a row.
+		const armGate = v.state === "overclaiming" && v.confidence >= this.cfg.threshold;
+		if (!confirmed) {
+			const note = v.confidence >= this.cfg.threshold ? "first sighting" : "below threshold";
+			if (armGate && this.cfg.mode === "steer") return { note: `${note}; done gate armed`, armGate: true };
+			return { note };
+		}
 		if (v.state === "looping" && facts.guardWindow > 0) return { note: "looping left to the fail-loop guard (it fired in this window)" };
-		const decision: Decision = { note: "confirmed" };
-		if (v.state === "overclaiming") decision.armGate = true;
+		const decision: Decision = { note: "confirmed", armGate };
 		if (this.cfg.mode !== "steer") return { ...decision, armGate: false, note: "confirmed (log mode: no steer)" };
 		if (now - this.lastSteerAt < this.cfg.steerGapMin * 60000) return { ...decision, note: "confirmed, rate-limited" };
 		const line = v.steer?.trim() || steerLine(v.steerId ?? STEER_FOR[v.state], facts);
@@ -868,6 +906,8 @@ export default function (pi: {
 			})
 			.then(verdict => {
 				const now = Date.now();
+				// The rule baseline rides along in every row, so the log pairs model and rules (weekly routine).
+				const rules = ruleVerdict(digest.facts);
 				const decision = controller.onVerdict(verdict, digest.facts, now);
 				if (decision.armGate) armDoneGate(digest.facts.item, `${verdict.state} ${verdict.confidence.toFixed(2)}`, 30, now);
 				if (decision.steer) pi.sendUserMessage?.(decision.steer, { deliverAs: "steer", attribution: "agent" });
@@ -875,7 +915,7 @@ export default function (pi: {
 				pi.logger?.warn?.("watcher: verdict", fields);
 				try {
 					mkdirSync(path.dirname(cfg.log), { recursive: true });
-					appendFileSync(cfg.log, `${JSON.stringify({ at: new Date(now).toISOString(), trigger, calls: digest.calls, mode: cfg.mode, api: cfg.api, model: cfg.api === "chat" ? cfg.model : cfg.api, verdict: { ...verdict, raw: undefined }, decision: decision.note, steer: decision.steer, facts: digest.facts, digest: digest.text })}\n`);
+					appendFileSync(cfg.log, `${JSON.stringify({ at: new Date(now).toISOString(), trigger, calls: digest.calls, mode: cfg.mode, api: cfg.api, model: cfg.api === "chat" ? cfg.model : cfg.api, verdict: { ...verdict, raw: undefined }, rules: verdict.source.startsWith("rules") ? undefined : { state: rules.state, confidence: rules.confidence }, decision: decision.note, steer: decision.steer, facts: digest.facts, digest: digest.text })}\n`);
 				} catch {
 					// Logging must never disturb the run.
 				}
