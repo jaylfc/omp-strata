@@ -101,6 +101,8 @@ export interface Snapshot {
 	jobsPending: number;
 	/** Index of the last successful todo call (the start of "no item" stretches). */
 	lastTodoCall: number;
+	/** Working directory from the session header, when the branch carries it. */
+	cwd?: string;
 }
 
 function obj(value: unknown): Record<string, unknown> {
@@ -128,6 +130,10 @@ export function snapshot(branch: readonly BranchEntry[]): Snapshot {
 	for (const raw of branch) {
 		const entry = raw as BranchEntry & { data?: unknown; mode?: string };
 		if (!entry) continue;
+		if (entry.type === "session" && typeof (entry as { cwd?: unknown }).cwd === "string") {
+			snap.cwd = (entry as { cwd: string }).cwd;
+			continue;
+		}
 		if (entry.type === "mode_change") {
 			const goal = obj(obj(entry.data).goal);
 			if (typeof goal.objective === "string") snap.objective = goal.status === "active" || goal.status === undefined ? goal.objective : snap.objective;
@@ -298,11 +304,13 @@ function scriptsWritten(call: CallRec): string[] {
 	return out;
 }
 
-/** Same file: equal, or one is absolute and ends with the other relative path (a/b.js vs /cwd/a/b.js). A relative suffix (a.js vs src/a.js) is a different file. */
-export function samePath(a: string, b: string): boolean {
-	const x = a.replace(/^\.\//, "");
-	const y = b.replace(/^\.\//, "");
-	return x === y || (x.startsWith("/") && x.endsWith(`/${y}`)) || (y.startsWith("/") && y.endsWith(`/${x}`));
+/**
+ * Same file. Relative paths are resolved against the session's working directory when it is known; without it
+ * only identical paths match. A shared suffix alone (a.js vs src/a.js, a.js vs /a.js) is never enough.
+ */
+export function samePath(a: string, b: string, cwd?: string): boolean {
+	const norm = (p: string) => (cwd ? path.resolve(cwd, p) : path.normalize(p));
+	return norm(a) === norm(b);
 }
 
 function normalizedCommand(call: CallRec): string | undefined {
@@ -384,7 +392,7 @@ export function computeFacts(snap: Snapshot, window = WINDOW): Facts {
 		const changed = changedPaths({ toolName: c.name, input: c.args, isError: c.isError, content: [{ type: "text", text: c.text }] });
 		if (changed.length) {
 			repeats.clear();
-			for (const p of changed) for (const k of [...reads.keys()]) if (samePath(p, k)) reads.delete(k);
+			for (const p of changed) for (const k of [...reads.keys()]) if (samePath(p, k, snap.cwd)) reads.delete(k);
 			continue;
 		}
 		const key = normalizedCommand(c);
@@ -527,8 +535,9 @@ export function renderDigest(snap: Snapshot, facts: Facts, window = WINDOW): str
 	return redact(lines.join("\n"));
 }
 
-export function buildDigest(branch: readonly BranchEntry[], window = WINDOW): { text: string; facts: Facts; calls: number } {
+export function buildDigest(branch: readonly BranchEntry[], window = WINDOW, cwd?: string): { text: string; facts: Facts; calls: number } {
 	const snap = snapshot(branch);
+	if (cwd) snap.cwd = cwd;
 	const facts = computeFacts(snap, window);
 	return { text: renderDigest(snap, facts, window), facts, calls: snap.calls.length };
 }
@@ -857,7 +866,8 @@ export class WatchController {
 // The extension
 
 interface Ctx {
-	sessionManager?: { getBranch?: () => readonly BranchEntry[] };
+	cwd?: string;
+	sessionManager?: { getBranch?: () => readonly BranchEntry[]; getCwd?: () => string };
 }
 
 export default function (pi: {
@@ -900,7 +910,13 @@ export default function (pi: {
 		lastCheckResults = results;
 		let digest: ReturnType<typeof buildDigest>;
 		try {
-			digest = buildDigest(branch);
+			let cwd: string | undefined;
+			try {
+				cwd = ctxRef?.cwd ?? ctxRef?.sessionManager?.getCwd?.();
+			} catch {
+				cwd = undefined;
+			}
+			digest = buildDigest(branch, WINDOW, cwd);
 		} catch (error) {
 			inFlight = false;
 			pi.logger?.warn?.("watcher: digest failed", { error: String(error) });

@@ -246,12 +246,16 @@ test("extension: log mode checks in the background every N results and logs, nev
 	}
 });
 
-test("samePath: directory prefixes match, bare suffixes do not", () => {
-	expect(samePath("cinderline/server/net.js", "/home/jay/dev/strata/omp/cinderline/server/net.js")).toBe(true);
-	expect(samePath("./a.js", "a.js")).toBe(true);
-	expect(samePath("a.js", "src/a.js")).toBe(false);
-	expect(samePath("xa.js", "src/a.js")).toBe(false);
-	expect(samePath("src/a.js", "lib/a.js")).toBe(false);
+test("samePath: resolved against the working directory; a shared suffix is not enough", () => {
+	const cwd = "/home/jay/dev/strata/omp";
+	expect(samePath("cinderline/server/net.js", "/home/jay/dev/strata/omp/cinderline/server/net.js", cwd)).toBe(true);
+	expect(samePath("./a.js", "a.js", cwd)).toBe(true);
+	expect(samePath("a.js", "src/a.js", cwd)).toBe(false);
+	expect(samePath("a.js", "/a.js", cwd)).toBe(false);
+	expect(samePath("src/a.js", "lib/a.js", cwd)).toBe(false);
+	// Without a working directory only identical paths match.
+	expect(samePath("a.js", "/a.js")).toBe(false);
+	expect(samePath("x/../a.js", "a.js")).toBe(true);
 });
 
 test("re-reads of one file are not reset by an edit to another file with the same name", () => {
