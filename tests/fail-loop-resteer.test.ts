@@ -47,7 +47,7 @@ test("addImageReadHint appends read hint for image paths and lists both paths", 
 	const result = addImageReadHint(input);
 	expect(result).not.toBeUndefined();
 	const taskText = (result as { tasks: Array<{ task: string }> }).tasks[0].task;
-	expect(taskText).toContain("check /tmp/a.png and ./b.jpg");
+	expect(taskText.startsWith("check /tmp/a.png and ./b.jpg\n\n")).toBe(true);
 	expect(taskText).toContain("read /tmp/a.png?q=<question>");
 	expect(taskText).toContain("/tmp/a.png");
 	expect(taskText).toContain("./b.jpg");
@@ -59,10 +59,10 @@ test("addImageReadHint deduplicates the same path listed twice in extracted path
 	const result = addImageReadHint(input);
 	expect(result).not.toBeUndefined();
 	const taskText = (result as { tasks: Array<{ task: string }> }).tasks[0].task;
-	// The hint should list the path only once in the comma-separated list
+	expect(taskText).toContain("Do not answer before reading each image: ");
 	const listPart = taskText.split("Do not answer before reading each image: ")[1];
 	expect(listPart).toContain("/tmp/a.png");
-	expect(listPart.split("/tmp/a.png").length).toBe(2); // appears once in the list
+	expect(listPart.split("/tmp/a.png").length).toBe(2);
 });
 
 test("addImageReadHint returns undefined when task already contains the hint marker", () => {
@@ -80,12 +80,11 @@ test("addImageReadHint matches .png but not .gif in same text", () => {
 	const result = addImageReadHint(input);
 	expect(result).not.toBeUndefined();
 	const taskText = (result as { tasks: Array<{ task: string }> }).tasks[0].task;
-	// Original text preserved
 	expect(taskText).toContain("/tmp/anim.gif");
 	expect(taskText).toContain("/tmp/frame.png");
-	// Hint only mentions the matched .png path
 	expect(taskText).toContain("read /tmp/frame.png?q=<question>");
 	expect(taskText).not.toContain("read /tmp/anim.gif?q=<question>");
+	expect(taskText).toContain("Do not answer before reading each image: ");
 	const listPart = taskText.split("Do not answer before reading each image: ")[1];
 	expect(listPart).toContain("/tmp/frame.png");
 	expect(listPart).not.toContain("/tmp/anim.gif");
