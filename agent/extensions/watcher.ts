@@ -863,6 +863,8 @@ export function cascadeConfirms(flag: WatchState | undefined, chat: Verdict | un
 export interface CascadeResult {
 	verdict: Verdict;
 	flag?: WatchState;
+	/** The System One threshold the flag was decided with (the cascade's own threshold for Kev, not the chat threshold). */
+	s1Threshold: number;
 	confirmed: boolean;
 	s1: Verdict;
 	chat?: Verdict;
@@ -886,7 +888,7 @@ export async function runCascade(cfg: WatcherConfig, digest: string, facts: Fact
 	const state: WatchState = confirmed && flag ? flag : s1.state === "waiting" ? "waiting" : "progressing";
 	const steerText = confirmed && flag ? (flag !== "overclaiming" && chat?.steer?.trim()) || steerLine(STEER_FOR[flag], facts) : "";
 	const verdict: Verdict = { state, confidence: confirmed ? Math.max(s1.confidence, chat?.confidence ?? 0) : 1 - s1.confidence, steer: steerText, steerId: confirmed && flag ? STEER_FOR[flag] : "none", source: "cascade", ms: Date.now() - started };
-	return { verdict, flag, confirmed, s1, chat };
+	return { verdict, flag, confirmed, s1, chat, s1Threshold: cfg.s1Threshold };
 }
 
 // ---------------------------------------------------------------------------
@@ -913,7 +915,10 @@ export class WatchController {
 		if (this.history.length > 20) this.history.shift();
 		if (!r.flag) return { note: "not flagged" };
 		if (!r.confirmed) return { note: r.chat ? `flag ${r.flag} vetoed by ${r.chat.state}` : `flag ${r.flag} not confirmed (chat model unavailable)` };
-		const armGate = r.flag === "overclaiming";
+		// An overclaiming flag arms the gate only when it came from the rules (claims without a probe are a computed
+		// fact) or from a System One verdict at or above the cascade's own threshold; the chat threshold does not apply
+		// because the chat model is not asked about claims.
+		const armGate = r.flag === "overclaiming" && (ruleVerdict(facts).state === "overclaiming" || (r.s1.state === "overclaiming" && r.s1.confidence >= r.s1Threshold));
 		if (r.flag === "looping" && facts.guardWindow > 0) return { note: "looping left to the fail-loop guard (it fired in this window)" };
 		if (this.cfg.mode !== "steer") return { note: "confirmed (log mode: no steer)", armGate: false };
 		if (now - this.lastSteerAt < this.cfg.steerGapMin * 60000) return { note: "confirmed, rate-limited", armGate };

@@ -321,6 +321,10 @@ test("runCascade: the chat model is asked only for non-overclaiming flags and wr
 	expect(c.onCascade(yes, d.facts, 0).steer).toContain("Watcher (looping, cascade): Stop re-reading net.js");
 	expect(c.onCascade(no, d.facts, 1).note).toContain("vetoed by progressing");
 	expect(c.s1Prev?.state).toBe("looping");
+	const claim = { verdict: { ...v("overclaiming", 0.4), steer: "verify" }, flag: "overclaiming" as const, confirmed: true, s1: v("overclaiming", 0.4), s1Threshold: 0.3 };
+	expect(new WatchController({ mode: "steer", threshold: 0.9, steerGapMin: 15 }).onCascade(claim, d.facts, 0).armGate).toBe(true);
+	const weak = { ...claim, s1: v("overclaiming", 0.2) };
+	expect(new WatchController({ mode: "steer", threshold: 0.9, steerGapMin: 15 }).onCascade(weak, d.facts, 0).armGate).toBe(false);
 	const log = new WatchController({ mode: "log", threshold: 0.9, steerGapMin: 15 });
 	const logged = log.onCascade(yes, d.facts, 0);
 	expect(logged.steer).toBeUndefined();
