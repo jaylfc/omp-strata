@@ -129,6 +129,7 @@ Deferred: a verifier in a fresh context (a `task` subagent, or the side model); 
   - `chat` (default): an OpenAI-compatible model answering JSON `{state, confidence, steer}`. With no `WATCHER_URL`/`WATCHER_MODEL` it uses `SIDE_BASE_URL`/`SIDE_MODEL_ID` from settings.env, i.e. the Mac side model.
   - `system1`: a decision model on llama.cpp `/v1/systemone` (for example Kev-4B). One described choice over the six states, option order shuffled per call; the steer is a template chosen by the state.
   - `rules`: no model, the computed-facts baseline. It is also the fallback when the endpoint fails.
+  - `cascade` (the default when `WATCHER_S1_URL` names a System One endpoint, for example Kev-4B on `/v1/systemone`): the rules and the System One model flag first. Overclaiming is flagged on one verdict from either. Any other problem needs the rules to flag it and two System One verdicts in a row (threshold `WATCHER_S1_THRESHOLD`, 0.3). The chat model is then asked only about the non-overclaiming flags: it confirms (any problem state) or vetoes (progressing or waiting), and its line is the steer. Overclaiming flags stand, since the done gate backstops them. On the lab 026 held-out windows this caught 11 of 16 with 3 false alarms in 15, against 13/16 and 5/15 for the flag alone and 9/16 and 1/15 for the chat model alone. Over the whole replayed session it halved the alarms outside documented episodes (0.48 to 0.26 per active hour). The chat model ran on 29% of checks (median 15.5 s each).
 - **Modes.** `OMP_STRATA_WATCHER`:
   - `log` (default): logs only. Each row in `watcher.jsonl` has the digest, facts, verdict, latency, the rule baseline's verdict, and what steer mode would have done.
   - `steer`: sends one steer line (`Watcher (<state>, NN%): …`) only after two consecutive checks agree on the same non-progress state at or above the threshold, at most once per `OMP_STRATA_WATCHER_STEER_GAP_MIN` minutes (15). A looping verdict is left to the fail-loop guard when the guard fired in the window. One overclaiming verdict at or above the threshold arms the done gate: the next `todo done` is checked as if `OMP_STRATA_DONE_GATE_TODO=on`, once, within 30 minutes.
@@ -143,6 +144,8 @@ Deferred: a verifier in a fresh context (a `task` subagent, or the side model); 
 | `OMP_STRATA_WATCHER_THRESHOLD` | `WATCHER_THRESHOLD` | chat 0.9, system1 0.4, rules 0.7 (fitted on the 026 train split) |
 | `OMP_STRATA_WATCHER_EVERY` / `_MINUTES` / `_TIMEOUT_S` / `_STEER_GAP_MIN` | `WATCHER_EVERY` / … | 8 / 10 / 90 / 15 |
 | `OMP_STRATA_WATCHER_LOG` | `WATCHER_LOG` | `~/.config/omp-strata/watcher.jsonl` |
+| `OMP_STRATA_WATCHER_S1_URL` | `WATCHER_S1_URL` | unset (set it to enable `cascade`) |
+| `OMP_STRATA_WATCHER_S1_THRESHOLD` | `WATCHER_S1_THRESHOLD` | 0.3 |
 
 Every check also logs `watcher: verdict` in the omp log.
 
